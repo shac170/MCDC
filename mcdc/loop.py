@@ -7,7 +7,7 @@ import mcdc.kernel as kernel
 import mcdc.type_ as type_
 
 import mcdc.print_ as print_module
-
+import time
 from mcdc.constant import *
 from mcdc.print_ import (
     print_header_batch,
@@ -26,7 +26,7 @@ from mcdc.print_ import (
 # =========================================================================
 
 
-@njit
+#@njit
 def loop_fixed_source(mcdc):
     # Loop over batches
     for idx_batch in range(mcdc["setting"]["N_batch"]):
@@ -293,10 +293,8 @@ def loop_source_dd(seed, mcdc):
     kernel.dd_particle_receive(mcdc)
     wr_new = 0
     max_work = 1
-    #print_msg("Done sourcing, now running")
     while not terminated:
         if mcdc["bank_active"]["size"] > 0:
-            # wr_new = 0
             # Loop until active bank is exhausted
             while mcdc["bank_active"]["size"] > 0:
                 P = kernel.get_particle(mcdc["bank_active"], mcdc)
@@ -314,7 +312,6 @@ def loop_source_dd(seed, mcdc):
                 # Particle tracker
                 if mcdc["setting"]["track_particle"]:
                     mcdc["particle_track_particle_ID"] += 1
-
                 # Particle loop
                 loop_particle(P, mcdc)
 
@@ -332,13 +329,14 @@ def loop_source_dd(seed, mcdc):
         if work_remaining > max_work:
             max_work = work_remaining
 
-        # Progress printout
-        percent = (1-work_remaining/max_work)*0.5+0.5
-        if mcdc["setting"]["progress_bar"] and int(percent * 100.0) > N_prog:
-            N_prog += 1
-            with objmode():
-                print_progress_dd(percent, mcdc,"running")
-        #print_msg(str(percent)+"percent"+ str(work_remaining)+','+str(max_work))
+        # Progress printout  
+        if work_remaining/max_work != 0:
+            percent = (1-work_remaining/max_work)*0.5+0.5
+            if mcdc["setting"]["progress_bar"] and int(percent * 100.0) > N_prog:
+                N_prog += 1
+                with objmode():
+                    print_progress_dd(percent, mcdc,"running")
+
         if work_remaining == 0:
             wr_new += 1
         else:
