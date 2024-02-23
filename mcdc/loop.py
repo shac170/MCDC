@@ -286,12 +286,12 @@ def loop_source_dd(seed, mcdc):
             kernel.tally_closeout_history(mcdc)
 
         # Progress printout
-        percent = ((work_idx + 1.0) / mcdc["mpi_work_size"])*0.5
+        percent = ((work_idx + 1.0) / mcdc["mpi_work_size"]) * 0.5
         if mcdc["setting"]["progress_bar"] and int(percent * 100.0) > N_prog:
             N_prog += 1
             with objmode():
-                print_progress_dd(percent, mcdc,"sourcing")
-    
+                print_progress_dd(percent, mcdc, "sourcing")
+
     kernel.dd_particle_send(mcdc)
     kernel.dd_particle_receive(mcdc)
     terminated = False
@@ -299,14 +299,12 @@ def loop_source_dd(seed, mcdc):
     max_work = 1
     work_remaining = 10
     while not terminated:
-        
         if mcdc["bank_active"]["size"] > 0:
             # Loop until active bank is exhausted
-            
+
             while mcdc["bank_active"]["size"] > 0:
                 P = kernel.get_particle(mcdc["bank_active"], mcdc)
 
-        
                 if not kernel.particle_in_domain(P, mcdc) and P["alive"] == True:
                     print("recieved particle not in domain, position:")
 
@@ -317,41 +315,37 @@ def loop_source_dd(seed, mcdc):
                 # Particle tracker
                 if mcdc["setting"]["track_particle"]:
                     mcdc["particle_track_particle_ID"] += 1
-                    
+
                 # Particle loop
                 loop_particle(P, mcdc)
-            
+
                 # Tally history closeout for one-batch fixed-source simulation
                 if (
                     not mcdc["setting"]["mode_eigenvalue"]
                     and mcdc["setting"]["N_batch"] == 1
                 ):
                     kernel.tally_closeout_history(mcdc)
-                    
+
             kernel.dd_particle_send(mcdc)
-        
 
         kernel.dd_particle_receive(mcdc)
-        
+
         work_remaining = int(kernel.allreduce(mcdc["bank_active"]["size"]))
         if work_remaining > max_work:
             max_work = work_remaining
-        
-        # Progress printout  
-        if work_remaining/max_work != 0:
-            percent = (1-work_remaining/max_work)*0.5+0.5
+
+        # Progress printout
+        if work_remaining / max_work != 0:
+            percent = (1 - work_remaining / max_work) * 0.5 + 0.5
             with objmode():
-                print_progress_dd(percent, mcdc,"running")
-        
+                print_progress_dd(percent, mcdc, "running")
+
         if work_remaining == 0:
             wr_new += 1
         else:
             wr_new = 0
         if wr_new > 4:
             terminated = True
-
-        # Progress printout
-    
 
 
 # =========================================================================

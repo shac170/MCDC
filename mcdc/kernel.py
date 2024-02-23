@@ -3,7 +3,7 @@ import math
 from mpi4py import MPI
 from numba import njit, objmode, literal_unroll
 import numba
-
+import pickle
 import mcdc.type_ as type_
 
 from mcdc.constant import *
@@ -94,8 +94,9 @@ def dd_particle_send(mcdc):
                 if i == len(mcdc["technique"]["xp_neigh"]) - 1:
                     end = size
                 bank = np.array(mcdc["bank_domain_xp"]["particles"][start:end])
-                request1 = MPI.COMM_WORLD.send(
-                    bank, dest=mcdc["technique"]["xp_neigh"][i], tag=1
+                pickled_data = pickle.dumps(bank)
+                MPI.COMM_WORLD.Isend(
+                    pickled_data, dest=mcdc["technique"]["xp_neigh"][i], tag=1
                 )
 
             if mcdc["technique"]["xn_neigh"].size > i:
@@ -106,8 +107,9 @@ def dd_particle_send(mcdc):
                 if i == len(mcdc["technique"]["xn_neigh"]) - 1:
                     end = size
                 bank = np.array(mcdc["bank_domain_xn"]["particles"][start:end])
-                request2 = MPI.COMM_WORLD.send(
-                    bank, dest=mcdc["technique"]["xn_neigh"][i], tag=2
+                pickled_data = pickle.dumps(bank)
+                MPI.COMM_WORLD.Isend(
+                    pickled_data, dest=mcdc["technique"]["xn_neigh"][i], tag=2
                 )
 
             if mcdc["technique"]["yp_neigh"].size > i:
@@ -118,8 +120,9 @@ def dd_particle_send(mcdc):
                 if i == len(mcdc["technique"]["yp_neigh"]) - 1:
                     end = size
                 bank = np.array(mcdc["bank_domain_yp"]["particles"][start:end])
-                request3 = MPI.COMM_WORLD.send(
-                    bank, dest=mcdc["technique"]["yp_neigh"][i], tag=3
+                pickled_data = pickle.dumps(bank)
+                MPI.COMM_WORLD.Isend(
+                    pickled_data, dest=mcdc["technique"]["yp_neigh"][i], tag=3
                 )
 
             if mcdc["technique"]["yn_neigh"].size > i:
@@ -130,8 +133,9 @@ def dd_particle_send(mcdc):
                 if i == len(mcdc["technique"]["yn_neigh"]) - 1:
                     end = size
                 bank = np.array(mcdc["bank_domain_yn"]["particles"][start:end])
-                request4 = MPI.COMM_WORLD.send(
-                    bank, dest=mcdc["technique"]["yn_neigh"][i], tag=4
+                pickled_data = pickle.dumps(bank)
+                MPI.COMM_WORLD.Isend(
+                    pickled_data, dest=mcdc["technique"]["yn_neigh"][i], tag=4
                 )
 
             if mcdc["technique"]["zp_neigh"].size > i:
@@ -142,8 +146,9 @@ def dd_particle_send(mcdc):
                 if i == len(mcdc["technique"]["zp_neigh"]) - 1:
                     end = size
                 bank = np.array(mcdc["bank_domain_zp"]["particles"][start:end])
-                request5 = MPI.COMM_WORLD.send(
-                    bank, dest=mcdc["technique"]["zp_neigh"][i], tag=5
+                pickled_data = pickle.dumps(bank)
+                MPI.COMM_WORLD.Isend(
+                    pickled_data, dest=mcdc["technique"]["zp_neigh"][i], tag=5
                 )
 
             if mcdc["technique"]["zn_neigh"].size > i:
@@ -154,8 +159,9 @@ def dd_particle_send(mcdc):
                 if i == len(mcdc["technique"]["zn_neigh"]) - 1:
                     end = size
                 bank = np.array(mcdc["bank_domain_zn"]["particles"][start:end])
-                request6 = MPI.COMM_WORLD.send(
-                    bank, dest=mcdc["technique"]["zn_neigh"][i], tag=6
+                pickled_data = pickle.dumps(bank)
+                MPI.COMM_WORLD.Isend(
+                    pickled_data, dest=mcdc["technique"]["zn_neigh"][i], tag=6
                 )
 
     mcdc["bank_domain_xp"]["size"] = 0
@@ -177,7 +183,6 @@ def dd_particle_receive(mcdc):
         mcdc["bank_domain_xp"]["particles"].shape[0], dtype=type_.particle_record
     )
     with objmode(size="int64"):
-        buff_size = int(mcdc["technique"]["exchange_rate"]*1e4)
         bankr = mcdc["bank_active"]["particles"][:0]
         for i in range(
             max(
@@ -190,65 +195,127 @@ def dd_particle_receive(mcdc):
             )
         ):
             if mcdc["technique"]["xp_neigh"].size > i:
-                received1 = MPI.COMM_WORLD.irecv(
-                    buf=buff_size,source=mcdc["technique"]["xp_neigh"][i], tag=2
-                )
-                if received1.Get_status():
-                    bankr = np.append(bankr, received1.wait())
-                else:
-                    MPI.Request.cancel(received1)
+                status = MPI.Status()
+                waiting = MPI.COMM_WORLD.Iprobe(source=mcdc["technique"]["xp_neigh"][i])
+                if waiting:
+                    status = MPI.Status()
+                    MPI.COMM_WORLD.Probe(
+                        source=mcdc["technique"]["xp_neigh"][i], status=status
+                    )
+                    data_size = status.Get_elements(MPI.BYTE)
+
+                    # Receive the message with the appropriate buffer size
+                    recv_buffer = bytearray(data_size)
+                    MPI.COMM_WORLD.Recv(
+                        recv_buffer, source=mcdc["technique"]["xp_neigh"][i], tag=2
+                    )
+                    if len(recv_buffer) != data_size:
+                        print("truncated pickle", len(recv_buffer), "out of", data_size)
+                        exit()
+                    bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["xn_neigh"].size > i:
-                received2 = MPI.COMM_WORLD.irecv(
-                    buf=buff_size,source=mcdc["technique"]["xn_neigh"][i], tag=1
-                )
-                if received2.Get_status():
-                    bankr = np.append(bankr, received2.wait())
-                else:
-                    MPI.Request.cancel(received2)
+                status = MPI.Status()
+                waiting = MPI.COMM_WORLD.Iprobe(source=mcdc["technique"]["xn_neigh"][i])
+                if waiting:
+                    status = MPI.Status()
+                    MPI.COMM_WORLD.Probe(
+                        source=mcdc["technique"]["xn_neigh"][i], status=status
+                    )
+                    data_size = status.Get_elements(MPI.BYTE)
+
+                    # Receive the message with the appropriate buffer size
+                    recv_buffer = bytearray(data_size)
+                    MPI.COMM_WORLD.Recv(
+                        recv_buffer, source=mcdc["technique"]["xn_neigh"][i], tag=1
+                    )
+                    if len(recv_buffer) != data_size:
+                        print("truncated pickle", len(recv_buffer), "out of", data_size)
+                        exit()
+                    bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["yp_neigh"].size > i:
-                received3 = MPI.COMM_WORLD.irecv(
-                    buf=buff_size,source=mcdc["technique"]["yp_neigh"][i], tag=4
-                )
-                if received3.Get_status():
-                    bankr = np.append(bankr, received3.wait())
-                else:
-                    MPI.Request.cancel(received3)
+                status = MPI.Status()
+                waiting = MPI.COMM_WORLD.Iprobe(source=mcdc["technique"]["yp_neigh"][i])
+                if waiting:
+                    status = MPI.Status()
+                    MPI.COMM_WORLD.Probe(
+                        source=mcdc["technique"]["yp_neigh"][i], status=status
+                    )
+                    data_size = status.Get_elements(MPI.BYTE)
+
+                    # Receive the message with the appropriate buffer size
+                    recv_buffer = bytearray(data_size)
+                    MPI.COMM_WORLD.Recv(
+                        recv_buffer, source=mcdc["technique"]["yp_neigh"][i], tag=4
+                    )
+                    if len(recv_buffer) != data_size:
+                        print("truncated pickle", len(recv_buffer), "out of", data_size)
+                        exit()
+                    bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["yn_neigh"].size > i:
-                received4 = MPI.COMM_WORLD.irecv(
-                    buf=buff_size,source=mcdc["technique"]["yn_neigh"][i], tag=3
-                )
-                if received4.Get_status():
-                    bankr = np.append(bankr, received4.wait())
-                else:
-                    MPI.Request.cancel(received4)
+                status = MPI.Status()
+                waiting = MPI.COMM_WORLD.Iprobe(source=mcdc["technique"]["yn_neigh"][i])
+                if waiting:
+                    status = MPI.Status()
+                    MPI.COMM_WORLD.Probe(
+                        source=mcdc["technique"]["yn_neigh"][i], status=status
+                    )
+                    data_size = status.Get_elements(MPI.BYTE)
+
+                    # Receive the message with the appropriate buffer size
+                    recv_buffer = bytearray(data_size)
+                    MPI.COMM_WORLD.Recv(
+                        recv_buffer, source=mcdc["technique"]["yn_neigh"][i], tag=3
+                    )
+                    if len(recv_buffer) != data_size:
+                        print("truncated pickle", len(recv_buffer), "out of", data_size)
+                        exit()
+                    bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["zp_neigh"].size > i:
-                received5 = MPI.COMM_WORLD.irecv(
-                    buf=buff_size,source=mcdc["technique"]["zp_neigh"][i], tag=6
-                )
-                if received5.Get_status():
-                    bankr = np.append(bankr, received5.wait())
-                else:
-                    MPI.Request.cancel(received5)
+                status = MPI.Status()
+                waiting = MPI.COMM_WORLD.Iprobe(source=mcdc["technique"]["zp_neigh"][i])
+                if waiting:
+                    status = MPI.Status()
+                    MPI.COMM_WORLD.Probe(
+                        source=mcdc["technique"]["zp_neigh"][i], status=status
+                    )
+                    data_size = status.Get_elements(MPI.BYTE)
+
+                    # Receive the message with the appropriate buffer size
+                    recv_buffer = bytearray(data_size)
+                    MPI.COMM_WORLD.Recv(
+                        recv_buffer, source=mcdc["technique"]["zp_neigh"][i], tag=6
+                    )
+                    if len(recv_buffer) != data_size:
+                        print("truncated pickle", len(recv_buffer), "out of", data_size)
+                        exit()
+                    bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["zn_neigh"].size > i:
-                received6 = MPI.COMM_WORLD.irecv(
-                    buf=buff_size,source=mcdc["technique"]["zn_neigh"][i], tag=5
-                )
-                if received6.Get_status():
-                    bankr = np.append(bankr, received6.wait())
-                else:
-                    MPI.Request.cancel(received6)
+                status = MPI.Status()
+                waiting = MPI.COMM_WORLD.Iprobe(source=mcdc["technique"]["zn_neigh"][i])
+                if waiting:
+                    status = MPI.Status()
+                    MPI.COMM_WORLD.Probe(
+                        source=mcdc["technique"]["zn_neigh"][i], status=status
+                    )
+                    data_size = status.Get_elements(MPI.BYTE)
+
+                    # Receive the message with the appropriate buffer size
+                    recv_buffer = bytearray(data_size)
+                    MPI.COMM_WORLD.Recv(
+                        recv_buffer, source=mcdc["technique"]["zn_neigh"][i], tag=5
+                    )
+                    bankr = np.append(bankr, pickle.loads(recv_buffer))
 
         size = bankr.shape[0]
         # Set output buffer
         for i in range(size):
             buff[i] = bankr[i]
-        # if (size-size_old)>0:
-        # print("recieved",size-size_old,"particles, in domain",mcdc["d_idx"])
+
     # Set source bank from buffer
     for i in range(size):
         add_particle(buff[i], mcdc["bank_active"])

@@ -38,7 +38,7 @@ elif mode == "numba_debug":
     print_warning(msg)
 
     nb.config.DISABLE_JIT = False  # turns on the jitter
-    nb.config.DEBUG = False  # turns on debugging options
+    nb.config.DEBUG = True  # turns on debugging options
     nb.config.NUMBA_FULL_TRACEBACKS = (
         1  # enables errors from sub-packages to be printed
     )
@@ -188,10 +188,11 @@ def dd_prepare():
     d_Ny = input_deck.technique["domain_mesh"]["y"].size - 1
     d_Nz = input_deck.technique["domain_mesh"]["z"].size - 1
 
-    input_deck.setting["bank_active_buff"] = 1000
     if input_deck.technique["exchange_rate"] == None:
         input_deck.technique["exchange_rate"] = 100
 
+    input_deck.setting["bank_active_buff"] = input_deck.technique["exchange_rate"]*100
+    
     if work_ratio is None:
         work_ratio = np.ones(d_Nx * d_Ny * d_Nz)
         input_deck.technique["work_ratio"] = work_ratio
