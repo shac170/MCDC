@@ -176,10 +176,9 @@ def dd_particle_receive(mcdc):
     buff = np.zeros(
         mcdc["bank_domain_xp"]["particles"].shape[0], dtype=type_.particle_record
     )
-    buff_size = int(mcdc["technique"]["exchange_rate"]*1e4)
     with objmode(size="int64"):
+        buff_size = int(mcdc["technique"]["exchange_rate"]*1e4)
         bankr = mcdc["bank_active"]["particles"][:0]
-        size_old = bankr.shape[0]
         for i in range(
             max(
                 len(mcdc["technique"]["xp_neigh"]),

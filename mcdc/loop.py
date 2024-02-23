@@ -30,7 +30,7 @@ from mcdc.print_ import (
 #     to effectivly disable cache, delete the cache folder (often located in /MCDC/mcdc/__pycache__)
 #     see more about cacheing here https://numba.readthedocs.io/en/stable/developer/caching.html
 
-#@njit
+@njit
 def loop_fixed_source(mcdc):
     # Loop over batches
     for idx_batch in range(mcdc["setting"]["N_batch"]):
@@ -291,23 +291,24 @@ def loop_source_dd(seed, mcdc):
             N_prog += 1
             with objmode():
                 print_progress_dd(percent, mcdc,"sourcing")
-
+    
     kernel.dd_particle_send(mcdc)
-    terminated = False
     kernel.dd_particle_receive(mcdc)
+    terminated = False
     wr_new = 0
     max_work = 1
+    work_remaining = 10
     while not terminated:
+        
         if mcdc["bank_active"]["size"] > 0:
             # Loop until active bank is exhausted
+            
             while mcdc["bank_active"]["size"] > 0:
                 P = kernel.get_particle(mcdc["bank_active"], mcdc)
-                # kernel.score_tracklength(P, SHIFT, mcdc)
-                # kernel.shift_particle(P,-SHIFT)
+
+        
                 if not kernel.particle_in_domain(P, mcdc) and P["alive"] == True:
                     print("recieved particle not in domain, position:")
-
-                # kernel.shift_particle(P, -1*SHIFT)
 
                 # Apply weight window
                 if mcdc["technique"]["weight_window"]:
@@ -316,31 +317,32 @@ def loop_source_dd(seed, mcdc):
                 # Particle tracker
                 if mcdc["setting"]["track_particle"]:
                     mcdc["particle_track_particle_ID"] += 1
+                    
                 # Particle loop
                 loop_particle(P, mcdc)
-
+            
                 # Tally history closeout for one-batch fixed-source simulation
                 if (
                     not mcdc["setting"]["mode_eigenvalue"]
                     and mcdc["setting"]["N_batch"] == 1
                 ):
                     kernel.tally_closeout_history(mcdc)
-
+                    
             kernel.dd_particle_send(mcdc)
+        
 
         kernel.dd_particle_receive(mcdc)
+        
         work_remaining = int(kernel.allreduce(mcdc["bank_active"]["size"]))
         if work_remaining > max_work:
             max_work = work_remaining
-
+        
         # Progress printout  
         if work_remaining/max_work != 0:
             percent = (1-work_remaining/max_work)*0.5+0.5
-            if mcdc["setting"]["progress_bar"] and int(percent * 100.0) > N_prog:
-                N_prog += 1
-                with objmode():
-                    print_progress_dd(percent, mcdc,"running")
-
+            with objmode():
+                print_progress_dd(percent, mcdc,"running")
+        
         if work_remaining == 0:
             wr_new += 1
         else:
@@ -349,6 +351,7 @@ def loop_source_dd(seed, mcdc):
             terminated = True
 
         # Progress printout
+    
 
 
 # =========================================================================
