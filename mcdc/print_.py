@@ -91,15 +91,17 @@ def print_progress(percent, mcdc):
         sys.stdout.flush()
 
 
-def print_progress_dd(percent, mcdc, stage):
+def print_progress_dd(percent, mcdc):
+    if percent < 0.5:
+        stage = "Sourcing"
+    else:
+        stage = "Running"
     if master:
         sys.stdout.write("\r")
         if not mcdc["setting"]["mode_eigenvalue"]:
             if mcdc["setting"]["N_census"] == 1:
                 sys.stdout.write(
-                    "DD:"
-                    + stage
-                    + " [%-28s] %d%%" % ("=" * int(percent * 28), percent * 100.0)
+                    "Stage: %s [%-28s] %d%%" % (stage,"=" * int(percent * 28), percent * 100.0)
                 )
             else:
                 idx = mcdc["idx_census"] + 1

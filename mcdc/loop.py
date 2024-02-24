@@ -217,7 +217,7 @@ def loop_source(seed, mcdc):
 # =============================================================================
 # DD Source loop
 # =============================================================================
-@njit
+@njit(debug=True)
 def loop_source_dd(seed, mcdc):
     # Progress bar indicator
     N_prog = 0
@@ -290,7 +290,7 @@ def loop_source_dd(seed, mcdc):
         if mcdc["setting"]["progress_bar"] and int(percent * 100.0) > N_prog:
             N_prog += 1
             with objmode():
-                print_progress_dd(percent, mcdc, "sourcing")
+                print_progress_dd(percent, mcdc)
 
     kernel.dd_particle_send(mcdc)
     kernel.dd_particle_receive(mcdc)
@@ -338,7 +338,7 @@ def loop_source_dd(seed, mcdc):
         if work_remaining / max_work != 0:
             percent = (1 - work_remaining / max_work) * 0.5 + 0.5
             with objmode():
-                print_progress_dd(percent, mcdc, "running")
+                print_progress_dd(percent, mcdc)
 
         if work_remaining == 0:
             wr_new += 1

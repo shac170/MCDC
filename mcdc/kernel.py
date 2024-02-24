@@ -203,15 +203,10 @@ def dd_particle_receive(mcdc):
                         source=mcdc["technique"]["xp_neigh"][i], status=status
                     )
                     data_size = status.Get_elements(MPI.BYTE)
-
-                    # Receive the message with the appropriate buffer size
                     recv_buffer = bytearray(data_size)
                     MPI.COMM_WORLD.Recv(
                         recv_buffer, source=mcdc["technique"]["xp_neigh"][i], tag=2
                     )
-                    if len(recv_buffer) != data_size:
-                        print("truncated pickle", len(recv_buffer), "out of", data_size)
-                        exit()
                     bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["xn_neigh"].size > i:
@@ -223,15 +218,10 @@ def dd_particle_receive(mcdc):
                         source=mcdc["technique"]["xn_neigh"][i], status=status
                     )
                     data_size = status.Get_elements(MPI.BYTE)
-
-                    # Receive the message with the appropriate buffer size
                     recv_buffer = bytearray(data_size)
                     MPI.COMM_WORLD.Recv(
                         recv_buffer, source=mcdc["technique"]["xn_neigh"][i], tag=1
                     )
-                    if len(recv_buffer) != data_size:
-                        print("truncated pickle", len(recv_buffer), "out of", data_size)
-                        exit()
                     bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["yp_neigh"].size > i:
@@ -243,15 +233,10 @@ def dd_particle_receive(mcdc):
                         source=mcdc["technique"]["yp_neigh"][i], status=status
                     )
                     data_size = status.Get_elements(MPI.BYTE)
-
-                    # Receive the message with the appropriate buffer size
                     recv_buffer = bytearray(data_size)
                     MPI.COMM_WORLD.Recv(
                         recv_buffer, source=mcdc["technique"]["yp_neigh"][i], tag=4
                     )
-                    if len(recv_buffer) != data_size:
-                        print("truncated pickle", len(recv_buffer), "out of", data_size)
-                        exit()
                     bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["yn_neigh"].size > i:
@@ -263,15 +248,10 @@ def dd_particle_receive(mcdc):
                         source=mcdc["technique"]["yn_neigh"][i], status=status
                     )
                     data_size = status.Get_elements(MPI.BYTE)
-
-                    # Receive the message with the appropriate buffer size
                     recv_buffer = bytearray(data_size)
                     MPI.COMM_WORLD.Recv(
                         recv_buffer, source=mcdc["technique"]["yn_neigh"][i], tag=3
                     )
-                    if len(recv_buffer) != data_size:
-                        print("truncated pickle", len(recv_buffer), "out of", data_size)
-                        exit()
                     bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["zp_neigh"].size > i:
@@ -283,15 +263,10 @@ def dd_particle_receive(mcdc):
                         source=mcdc["technique"]["zp_neigh"][i], status=status
                     )
                     data_size = status.Get_elements(MPI.BYTE)
-
-                    # Receive the message with the appropriate buffer size
                     recv_buffer = bytearray(data_size)
                     MPI.COMM_WORLD.Recv(
                         recv_buffer, source=mcdc["technique"]["zp_neigh"][i], tag=6
                     )
-                    if len(recv_buffer) != data_size:
-                        print("truncated pickle", len(recv_buffer), "out of", data_size)
-                        exit()
                     bankr = np.append(bankr, pickle.loads(recv_buffer))
 
             if mcdc["technique"]["zn_neigh"].size > i:
@@ -303,8 +278,6 @@ def dd_particle_receive(mcdc):
                         source=mcdc["technique"]["zn_neigh"][i], status=status
                     )
                     data_size = status.Get_elements(MPI.BYTE)
-
-                    # Receive the message with the appropriate buffer size
                     recv_buffer = bytearray(data_size)
                     MPI.COMM_WORLD.Recv(
                         recv_buffer, source=mcdc["technique"]["zn_neigh"][i], tag=5
