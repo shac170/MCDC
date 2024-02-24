@@ -101,7 +101,8 @@ def print_progress_dd(percent, mcdc):
         if not mcdc["setting"]["mode_eigenvalue"]:
             if mcdc["setting"]["N_census"] == 1:
                 sys.stdout.write(
-                    "Stage: %s [%-28s] %d%%" % (stage,"=" * int(percent * 28), percent * 100.0)
+                    "Stage: %s [%-28s] %d%%"
+                    % (stage, "=" * int(percent * 28), percent * 100.0)
                 )
             else:
                 idx = mcdc["idx_census"] + 1
