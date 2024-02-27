@@ -7,7 +7,6 @@ import mcdc.kernel as kernel
 import mcdc.type_ as type_
 
 import mcdc.print_ as print_module
-import time
 from mcdc.constant import *
 from mcdc.print_ import (
     print_header_batch,
@@ -296,9 +295,7 @@ def loop_source_dd(seed, mcdc):
     kernel.dd_particle_send(mcdc)
     kernel.dd_particle_receive(mcdc)
     terminated = False
-    wr_new = 0
     max_work = 1
-    work_remaining = 10
     while not terminated:
         if mcdc["bank_active"]["size"] > 0:
             # Loop until active bank is exhausted
@@ -332,20 +329,18 @@ def loop_source_dd(seed, mcdc):
         kernel.dd_particle_receive(mcdc)
 
         work_remaining = int(kernel.allreduce(mcdc["bank_active"]["size"]))
+        total_sent = int(kernel.allreduce(mcdc["technique"]["sent"]))
+        total_recieved = int(kernel.allreduce(mcdc["technique"]["recieved"]))
+
         if work_remaining > max_work:
             max_work = work_remaining
 
         # Progress printout
-        if work_remaining / max_work != 0:
-            percent = (1 - work_remaining / max_work) * 0.5 + 0.5
-            with objmode():
-                print_progress_dd(percent, mcdc)
+        percent = (1 - work_remaining / max_work) * 0.5 + 0.5
+        with objmode():
+            print_progress_dd(percent, mcdc)
 
-        if work_remaining == 0:
-            wr_new += 1
-        else:
-            wr_new = 0
-        if wr_new > 4:
+        if work_remaining + total_recieved - total_sent == 0:
             terminated = True
 
 

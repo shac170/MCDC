@@ -95,7 +95,7 @@ def dd_particle_send(mcdc):
                     end = size
                 bank = np.array(mcdc["bank_domain_xp"]["particles"][start:end])
                 pickled_data = pickle.dumps(bank)
-                MPI.COMM_WORLD.Isend(
+                MPI.COMM_WORLD.Ibsend(
                     pickled_data, dest=mcdc["technique"]["xp_neigh"][i], tag=1
                 )
 
@@ -108,7 +108,7 @@ def dd_particle_send(mcdc):
                     end = size
                 bank = np.array(mcdc["bank_domain_xn"]["particles"][start:end])
                 pickled_data = pickle.dumps(bank)
-                MPI.COMM_WORLD.Isend(
+                MPI.COMM_WORLD.Ibsend(
                     pickled_data, dest=mcdc["technique"]["xn_neigh"][i], tag=2
                 )
 
@@ -121,7 +121,7 @@ def dd_particle_send(mcdc):
                     end = size
                 bank = np.array(mcdc["bank_domain_yp"]["particles"][start:end])
                 pickled_data = pickle.dumps(bank)
-                MPI.COMM_WORLD.Isend(
+                MPI.COMM_WORLD.Ibsend(
                     pickled_data, dest=mcdc["technique"]["yp_neigh"][i], tag=3
                 )
 
@@ -134,7 +134,7 @@ def dd_particle_send(mcdc):
                     end = size
                 bank = np.array(mcdc["bank_domain_yn"]["particles"][start:end])
                 pickled_data = pickle.dumps(bank)
-                MPI.COMM_WORLD.Isend(
+                MPI.COMM_WORLD.Ibsend(
                     pickled_data, dest=mcdc["technique"]["yn_neigh"][i], tag=4
                 )
 
@@ -147,7 +147,7 @@ def dd_particle_send(mcdc):
                     end = size
                 bank = np.array(mcdc["bank_domain_zp"]["particles"][start:end])
                 pickled_data = pickle.dumps(bank)
-                MPI.COMM_WORLD.Isend(
+                MPI.COMM_WORLD.Ibsend(
                     pickled_data, dest=mcdc["technique"]["zp_neigh"][i], tag=5
                 )
 
@@ -160,9 +160,19 @@ def dd_particle_send(mcdc):
                     end = size
                 bank = np.array(mcdc["bank_domain_zn"]["particles"][start:end])
                 pickled_data = pickle.dumps(bank)
-                MPI.COMM_WORLD.Isend(
+                MPI.COMM_WORLD.Ibsend(
                     pickled_data, dest=mcdc["technique"]["zn_neigh"][i], tag=6
                 )
+
+    sent_particles = (
+        mcdc["bank_domain_xp"]["size"]
+        + mcdc["bank_domain_xn"]["size"]
+        + mcdc["bank_domain_yp"]["size"]
+        + mcdc["bank_domain_yn"]["size"]
+        + mcdc["bank_domain_zp"]["size"]
+        + mcdc["bank_domain_zn"]["size"]
+    )
+    mcdc["technique"]["sent"] += sent_particles
 
     mcdc["bank_domain_xp"]["size"] = 0
     mcdc["bank_domain_xn"]["size"] = 0
@@ -293,6 +303,7 @@ def dd_particle_receive(mcdc):
     for i in range(size):
         add_particle(buff[i], mcdc["bank_active"])
 
+    mcdc["technique"]["recieved"] += size
 
 # =============================================================================
 # Particle in domain

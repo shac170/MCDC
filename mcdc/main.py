@@ -191,8 +191,11 @@ def dd_prepare():
     if input_deck.technique["exchange_rate"] == None:
         input_deck.technique["exchange_rate"] = 100
 
-    input_deck.setting["bank_active_buff"] = input_deck.technique["exchange_rate"]*100
-    
+    # Create buffer for particle send
+    MPI.Attach_buffer(bytearray(input_deck.technique["exchange_rate"] * 10000))
+
+    input_deck.setting["bank_active_buff"] = input_deck.technique["exchange_rate"] * 100
+
     if work_ratio is None:
         work_ratio = np.ones(d_Nx * d_Ny * d_Nz)
         input_deck.technique["work_ratio"] = work_ratio
