@@ -191,9 +191,6 @@ def dd_prepare():
     if input_deck.technique["exchange_rate"] == None:
         input_deck.technique["exchange_rate"] = 100
 
-    # Create buffer for particle send
-    MPI.Attach_buffer(bytearray(input_deck.technique["exchange_rate"] * 10000))
-
     input_deck.setting["bank_active_buff"] = input_deck.technique["exchange_rate"] * 100
 
     if work_ratio is None:
@@ -211,6 +208,9 @@ def dd_prepare():
         exit()
 
     if input_deck.technique["domain_decomp"]:
+        # Create buffer for particle send
+        MPI.Attach_buffer(bytearray(input_deck.technique["exchange_rate"] * 10000))
+
         # Assigning domain index
         i = 0
         rank_info = []
