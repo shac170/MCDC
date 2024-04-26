@@ -19,10 +19,10 @@ authors: # x=reviewed
     orcid: 0000-0003-3426-7160
     affiliation: "1, 2"
     corresponding: true
-  - name: Samuel Pasmann
+  - name: Samuel L. Pasmann
     orcid: 0000-0003-1391-1471
     affiliation: "1, 3"
-  - name: Kayla Beth Clements
+  - name: Kayla B. Clements
     orcid: 0000-0003-3358-5618
     affiliation: "1, 2"
   - name: Braxton Cuneo
@@ -35,7 +35,7 @@ authors: # x=reviewed
     affiliation: "1, 4"
   - name: Caleb Shaw 
     affiliation: "1, 4"
-  - name: Jordan Northrop 
+  - name: Jordan Northrop
     orcid: 0000-0003-0420-9699
     affiliation: "1, 2"
   - name: Rohan Pankaj
@@ -47,20 +47,20 @@ authors: # x=reviewed
   - name:  Benjamin Whewell
     orcid: 0000-0001-7826-5525
     affiliation: "1, 3"
-  - name: Ryan McClarren #advisors in order of authors except Niemeyer
+  - name: Ryan G. McClarren #advisors in order of authors except Niemeyer
     orcid: 0000-0002-8342-6132
     affiliation: "1, 3"
-  - name: Todd Palmer
+  - name: Todd S. Palmer
     orcid: 0000-0003-3310-5258
     affiliation: "1, 2"
   - name: Lizhong Chen 
     orcid: 0000-0001-5890-7121
     affiliation: "1, 2"
-  - name: Dmitriy Anistratov
+  - name: Dmitriy Y. Anistratov
     affiliation: "1, 4"
   - name: C. T. Kelley
     affiliation: "1, 4"
-  - name: Camille Palmer
+  - name: Camille J. Palmer
     orcid: 0000-0002-7573-4215
     affiliation: "1, 2"
   - name: Kyle E. Niemeyer
@@ -118,9 +118,9 @@ This all together makes `MC/DC` ideal for use in an academic environment for bot
 `MC/DC` has support for continuous and multi-group energy neutron transport physics with constructive solid geometry modeling.
 It can solve k-eigenvalue problems (used to determine neutron population growth rates in reactors) as well as fully dynamic simulations.
 It also supports some simple domain decomposition, with more complex algorithms currently being implemented.
-In an initial code-to-code performance comparison, `MC/DC` was found to run about 2.5 times slower than the Shift Monte Carlo code for a simple problem and showed similar scaling on some systems [@mcdc:variansyah_mc23_mcdc].
+In an initial code-to-code performance comparison, `MC/DC` was found to run about 2.5 times slower than the Shift Monte Carlo code for a simple problem and showed similar scaling on some systems [@variansyah_mc23_mcdc].
 
-`MC/DC`-enabled explorations into dynamic neutron transport algorithms have been successful, including quasi-Monte Carlo techniques [@mcdc:qmc], hybrid iterative techniques for k-eigenvalue simulations [@mcdc:qmcabs], population control techniques [@mcdc:variansyah_nse22_pct; @mcdc:variansyah_physor22_pct], continuous geometry movement techniques that model transient elements [@mcdc:variansyah_mc23_moving_object] (e.g., control rods or pulsed neutron experiments) more accurately than step functions typically used by other codes, initial condition sampling technique for typical reactor transients [@mcdc:variansyah_mc23_ic], hash-based random number generation [@mcdc:cuneo2024alternative], uncertainty and global sensitivity analysis [@mcdc:clements_mc23; @mcdc:clements_variance_2024], residual Monte Carlo methods, and machine learning techniques for dynamic node scheduling, among others.
+`MC/DC`-enabled explorations into dynamic neutron transport algorithms have been successful, including quasi-Monte Carlo techniques [@mcdc:qmc], hybrid iterative techniques for k-eigenvalue simulations [@mcdc:qmcabs], population control techniques [@mcdc:variansyah_nse22_pct; @mcdc:variansyah_physor22_pct], continuous geometry movement techniques that model transient elements [@variansyah_mc23_moving_object] (e.g., control rods or pulsed neutron experiments) more accurately than step functions typically used by other codes, initial condition sampling technique for typical reactor transients [@variansyah_mc23_ic], hash-based random number generation [@mcdc:cuneo2024alternative], uncertainty and global sensitivity analysis [@mcdc:clements_mc23; @mcdc:clements_variance_2024], residual Monte Carlo methods, and machine learning techniques for dynamic node scheduling, among others.
 
 # Future Work
 
