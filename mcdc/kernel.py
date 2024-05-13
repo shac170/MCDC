@@ -1452,6 +1452,7 @@ def population_control(seed, mcdc):
 @njit
 def pct_combing(seed, mcdc):
     bank_census = mcdc["bank_census"]
+    print(bank_census["size"])
     M = mcdc["setting"]["N_particle"]
     bank_source = mcdc["bank_source"]
 
@@ -1469,6 +1470,7 @@ def pct_combing(seed, mcdc):
     offset = xi * td
 
     # First hiting tooth
+    print("PRINT:",idx_start ,offset, td,xi,N)
     tooth_start = math.ceil((idx_start - offset) / td)
 
     # Last hiting tooth
@@ -3391,7 +3393,7 @@ def branchless_collision(P, prog):
 
 
 @njit
-def weight_window(P, prog):
+def weight_window_old(P, prog):
     mcdc = adapt.device(prog)
 
     # Get indices
@@ -3434,6 +3436,86 @@ def weight_window(P, prog):
         else:
             P["w"] = w_target
 
+
+@njit
+def weight_window(P, prog):
+    mcdc = adapt.device(prog)
+    if P["w"] < 1/INF:
+        P["alive"] = False
+    else:
+        # Get indices
+        t, x, y, z, outside = mesh_get_index(P, mcdc["technique"]["ww_mesh"])
+
+        # Target weight
+        w_target = mcdc["technique"]["ww"][t, x, y, z]
+
+        # Population control factor
+        w_target *= mcdc["technique"]["pc_factor"]
+
+        # Window width
+        width = mcdc["technique"]["ww_width"]
+
+        # Max number of splits 
+        n_max = 1000
+
+        # upper limit
+        ulimit = w_target*width
+
+        # lower limit 
+        llimit = w_target/width
+
+        # If above target
+        if P["w"] > ulimit:
+
+            # Splitting
+            n_split = min(n_max,math.ceil(P["w"]/ulimit))
+            #print(t,x,y,z,"Splitting into ",n_split, "particles from weight",P['w']," to weight",P["w"]/n_split, " target weight",w_target, "(",llimit,",",ulimit,")")
+            #input()
+            # Set target weight
+            P["w"] /= n_split
+
+            for i in range(n_split):
+                adapt.add_active(split_particle(P), prog)
+            P["alive"] = False
+
+        # Below target
+        elif P['w'] < llimit:
+            # Russian roulette
+            # Survival weight
+            w_survival = min(n_max*P['w'],1.1*llimit)
+            xi = rng(P)
+            if xi > P["w"]/w_survival:
+                P["alive"] = False
+            else:
+                P["w"] = w_survival
+@njit
+def ww_alpha(mcdc,idx_census):
+    # Note: time census mesh must align with tally time mesh for this to work
+
+    # Target weight
+    windows = mcdc["technique"]["ww"]
+
+    # Window width
+    width = mcdc["technique"]["ww_width"]
+
+    # compute alpha in each mesh cell 
+    #flux = np.copy(mcdc["tally"]["score"]["flux"][0][0,0,idx_census,:,:,:,0,0])
+    #flux_old = np.copy(mcdc["tally"]["score"]["flux"][0][0,0,idx_census-1,:,:,:,0,0])
+    
+    flux = np.copy(mcdc["tally"]["score"]["flux"][0][0,0,idx_census-2,:,:,:,0,0])
+    old_flux = np.copy(mcdc["tally"]["score"]["flux"][0][0,0,idx_census-3,:,:,:,0,0])
+    print(np.max(abs(flux)),np.max(abs(old_flux)),flux)
+    #input()
+    if np.max(abs(old_flux))>0.0:
+        min_value_flux = np.min(old_flux[old_flux!=0])
+        old_flux[old_flux==0] = min_value_flux/2
+        alpha = np.divide(flux,old_flux)
+        print(np.linalg.norm(alpha))
+        input()
+        new_flux =flux*np.exp(alpha)
+        mcdc["technique"]["ww"][idx_census] = new_flux
+
+    #        ["flux", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
 
 # ==============================================================================
 # Quasi Monte Carlo
