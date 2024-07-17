@@ -548,12 +548,42 @@ def prepare():
         for name in type_.source.names:
             copy_field(mcdc["sources"][i], input_deck.sources[i], name)
 
+    # =========================================================================
+    # Hybrid techniques
+    # =========================================================================
+    # WW mesh
+    if input_deck.technique["hybrid"]:
+        for name in type_.mesh_names[:-1]:
+            copy_field(mcdc["technique"]["deterministic"]["mesh"], input_deck.technique["deterministic"]["mesh"], name)
+
+        kernel.hybrid_preprocess(mcdc)
+    normalization_factor = 0
+    for source in mcdc["sources"]:
+        if source["box"] == 0:
+            normalization_factor += source["prob"]
+        else:
+            dx = source["box_x"][1] - source["box_x"][0]
+            if dx == 0:
+                dx = 1
+            dy = source["box_y"][1] - source["box_y"][0]
+            if dy == 0:
+                dy = 1            
+            dz = source["box_z"][1] - source["box_z"][0]
+            if dz == 0:
+                dz = 1            
+            dt = source["time"][1] - source["time"][0]
+            if dt == 0:
+                dt = 1
+            normalization_factor += dx*dy*dz*dt*source["prob"]
+    mcdc["technique"]["integrated_source"] = normalization_factor
+
     # Normalize source probabilities
     tot = 0.0
     for S in mcdc["sources"]:
         tot += S["prob"]
     for S in mcdc["sources"]:
         S["prob"] /= tot
+    print(tot)
 
     # =========================================================================
     # Tally
@@ -636,8 +666,13 @@ def prepare():
         copy_field(mcdc["technique"]["ww_mesh"], input_deck.technique["ww_mesh"], name)
 
     # WW windows
-    mcdc["technique"]["ww"] = input_deck.technique["ww"]
+   
     mcdc["technique"]["ww_width"] = input_deck.technique["ww_width"]
+    mcdc["technique"]["ww_auto"] = input_deck.technique["ww_auto"]
+    mcdc["technique"]["ww_epsilon"] = input_deck.technique["ww_epsilon"]
+    mcdc["technique"]["ww"] = input_deck.technique["ww"]
+
+
 
     # =========================================================================
     # Weight roulette
@@ -666,6 +701,7 @@ def prepare():
         for name in ["xp", "xn", "yp", "yn", "zp", "zn"]:
             copy_field(mcdc["technique"], input_deck.technique, f"dd_{name}_neigh")
         copy_field(mcdc["technique"], input_deck.technique, "dd_work_ratio")
+
 
     # =========================================================================
     # Quasi Monte Carlo
@@ -958,6 +994,17 @@ def generate_hdf5(mcdc):
                     input_deck.technique, input_group.create_group("technique")
                 )
 
+            # Store deterministic problem
+            det = mcdc["technique"]["deterministic"]
+            f.create_dataset(
+                            "input_deck/deterministic/source",
+                            data=np.squeeze(det["source"]),
+                        )
+            f.create_dataset(
+                            "input_deck/deterministic/material_idx",
+                            data=np.squeeze(det["material_idx"]),
+                        )
+            
             # Tally
             T = mcdc["tally"]
             f.create_dataset("tally/grid/t", data=T["mesh"]["t"])
@@ -992,6 +1039,12 @@ def generate_hdf5(mcdc):
                             data=np.squeeze(tot_var - mc_var),
                         )
 
+            # Store number of census particles
+            f.create_dataset(
+                            "tally/census-particles",
+                            data=np.squeeze(mcdc["census_particles"]),
+                        )
+
             # Eigenvalues
             if mcdc["setting"]["mode_eigenvalue"]:
                 if mcdc["technique"]["iQMC"]:
@@ -1011,6 +1064,7 @@ def generate_hdf5(mcdc):
                         f.create_dataset(
                             "gyration_radius", data=mcdc["gyration_radius"][:N_cycle]
                         )
+
 
             # iQMC
             if mcdc["technique"]["iQMC"]:
@@ -1062,6 +1116,24 @@ def generate_hdf5(mcdc):
                         "iqmc/outter_final_residual", data=T["iqmc"]["res_outter"]
                     )
 
+            # Weight windows
+            if mcdc["technique"]["weight_window"]:
+                # dump iQMC mesh
+                T = mcdc["technique"]
+                
+                # User input ww
+                if T["ww_auto"] == 0:
+                    f.create_dataset("ww_data/windows", data=T["ww"])
+                # Previous ww
+                elif T["ww_auto"] == 1:
+                    f.create_dataset("ww_data/windows", data=T["ww"])
+                    f.create_dataset("ww_data/phi_previous", data=T["ww_phi_tilde"])
+                # Alpha approximation ww
+                elif T["ww_auto"] in (2.0, 2.5):
+                    f.create_dataset("ww_data/windows", data=T["ww"])
+                    f.create_dataset("ww_data/alpha", data=T["ww_alpha"])
+                    f.create_dataset("ww_data/phi_tilde", data=T["ww_phi_tilde"])
+ 
             # Particle tracker
             if mcdc["setting"]["track_particle"]:
                 with h5py.File(mcdc["setting"]["output"] + "_ptrack.h5", "w") as f:
@@ -1117,6 +1189,7 @@ def closeout(mcdc):
                 "simulation",
                 "output",
                 "bank_management",
+                "census"
             ]:
                 f.create_dataset(
                     "runtime/" + name, data=np.array([mcdc["runtime_" + name]])

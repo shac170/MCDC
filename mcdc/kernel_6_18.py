@@ -1,4 +1,5 @@
 import math
+
 from mpi4py import MPI
 from numba import njit, objmode, literal_unroll
 import numba
@@ -998,7 +999,6 @@ def get_particle(P, bank, mcdc):
 
 @njit
 def manage_particle_banks(seed, mcdc):
-    mcdc["census_particles"][mcdc["idx_census"]] = mcdc["bank_census"]["size"]
     # Record time
     if mcdc["mpi_master"]:
         with objmode(time_start="float64"):
@@ -2129,10 +2129,8 @@ def score_tracklength(P, distance, mcdc):
         score_eddington(s, g, t, x, y, z, flux, P, tally["score"]["eddington"])
     if tally["second_moment"]:
         score_second_moment(s, g, t, x, y, z, flux, P, tally["score"]["second_moment"])
-    if tally["tracklength_tally"]:
+    if tally["tracklength"]:
         score_flux(s, g, t, x, y, z, mu, azi, distance, tally["score"]["tracklength_tally"])
-    if tally["particle_density"]:
-        score_flux(s, g, t, x, y, z, mu, azi, 1, tally["score"]["particle_density"])
 
 @njit
 def score_exit(P, x, mcdc):
@@ -2191,22 +2189,8 @@ def score_second_moment(s, g, t, x, y, z, flux, P, score):
     ux = P["ux"]
     uy = P["uy"]
     uz = P["uz"]
-
-    # F tensor
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 0), (1/3 - ux * ux) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 1), (1/3 - ux * uy) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 2), (1/3 - ux * uz) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 3), (1/3 - uy * uy) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 4), (1/3 - uy * uz) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 5), (1/3 - uz * uz) * flux)    
-
-    # Boundary factors
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 6), (1/2 - np.abs(ux)) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 7), (1/2 - np.abs(uy)) * flux)
-    adapt.global_add(score["bin"], (s, g, t, x, y, z, 8), (1/2 - np.abs(uz)) * flux)
-
-
-
+    adapt.global_add(score["bin"], (s, g, t, x, y, z, 0), (1/3 - uz * uz) * flux)
+    adapt.global_add(score["bin"], (s, g, t, x, y, z, 1), (1/2 - np.abs(uz)) * flux)
 
 @njit
 def score_reduce_bin(score, mcdc):
@@ -3428,17 +3412,7 @@ def weight_window(P, prog):
 
         # Set target weight 
         epsilon = mcdc["technique"]["ww_epsilon"]
-
-        # My method
-        #w_target = (mcdc["technique"]["ww"][t, x, y, z])*(1-epsilon)+epsilon
-
-        # Wollaber Modification
-        epsi = 1e-4
-        window = mcdc["technique"]["ww"][t, x, y, z]*(1-epsi)+epsi
-        w_min = 0.01#np.min(window[window!=0])
-        
-        w_target = (window)*(1+(1/epsilon-1)*np.exp(-(window-w_min)/epsilon))
-
+        w_target = (mcdc["technique"]["ww"][t, x, y, z])*(1-epsilon)+epsilon
         # Window width
         width = mcdc["technique"]["ww_width"]
 
@@ -3475,525 +3449,112 @@ def weight_window(P, prog):
             else:
                 P["w"] = w_survival
 
-
-def write_output(file, idx_census, t, x_mid, data, method, epsilon, width):
-    with open(file, 'a' if idx_census > 2 else 'w') as f:
-        if idx_census == 2:
-            f.write(f"Weight Window Output\n Method: {method}\nWindow width,{width}\nEpsilon,{epsilon}\n")
-        f.write(f"\ntimestep,{idx_census}\nSim Time,{t[idx_census]},dt:,{t[idx_census] - t[idx_census - 1]}\n")
-        f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
-        for key, values in data.items():
-            f.write(f"{key}: ," + ", ".join(f"{val:.6e}" for val in values) + "\n")
-
-def ww_auto(mcdc, dump=True):
-    idx_n0 = mcdc["idx_census"] 
-    idx_n1 = idx_n0 - 1
-    idx_n2 = idx_n1 - 1 
-
-    dt = abs(mcdc["tally"]["mesh"]['t'][idx_n0] - mcdc["tally"]["mesh"]['t'][idx_n1])
-    dx = abs(mcdc["tally"]["mesh"]['x'][1:] - mcdc["tally"]["mesh"]['x'][:-1])
-    N_particle = mcdc["setting"]["N_particle"]
-
-    # Normalizing tallies 
-    flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_n1])
-    flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
+@njit
+def ww_auto(mcdc,dump=True):
+    # Note: time census mesh must align with tally time mesh for this to work
+    rank = MPI.COMM_WORLD.Get_rank()
+    idx_census = mcdc["idx_census"] 
+    # Target weight
+    windows = mcdc["technique"]["ww"]
 
     # Window width
     width = mcdc["technique"]["ww_width"]
+
+    dt = abs((mcdc["tally"]["mesh"]['t'][idx_census-1]-mcdc["tally"]["mesh"]['t'][idx_census-2]))
+    dx = abs((mcdc["tally"]["mesh"]['x'][1:]-mcdc["tally"]["mesh"]['x'][:-1]))
+    N_particle = mcdc["setting"]["N_particle"]
+
+    # Phi n - 1
+    flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_census-2])/N_particle
+    flux /= dx * dt
+
+    # WW output file
+
     epsilon = mcdc["technique"]["ww_epsilon"]
+    if np.max(np.abs(flux))>0:
+ 
+        if mcdc["technique"]["ww_auto"] == 0:
+            file = 'ww_data_analytic.csv'
+            # Analytic ww (user input)
+            # Write output to dump file
+            if dump and rank == 0:
+                    t = mcdc["tally"]["mesh"]["t"]
+                    x = mcdc["tally"]["mesh"]["x"]
+                    x_mid = 0.5 * (x[:-1] + x[1:])
+                    if idx_census == 2:
+                        f = open(file,"w")
+                        f.write("Weight Window Output"+"\n Method: Analytic\nWindow width,"+str(width)+"\nEpsilon,"+str(epsilon)+"\n")
 
-    t = mcdc["tally"]["mesh"]["t"]
-    x = mcdc["tally"]["mesh"]["x"]
-    x_mid = 0.5 * (x[:-1] + x[1:])
-    # User supplied weight windows
-    if mcdc["technique"]["ww_auto"] == 0:
-        file = 'ww_data_analytic.csv'
-        method = "Analytic"
-        data = {
-            "analytic phi": mcdc["technique"]["ww"][idx_n0, :, 0, 0],
-            "ww": mcdc["technique"]["ww"][idx_n0, :, 0, 0] / np.max(mcdc["technique"]["ww"][idx_n0, :, 0, 0]) * (1 - epsilon) + epsilon
-        }
+                    else:
+                        f = open(file,"a")
+                    f.write("\ntimestep,"+str(idx_census)+'\nSim Time,'+str(t[idx_census])+',dt:,'+str(t[idx_census]-t[idx_census-1])+'\n')
+                    f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
+                    f.write("analytic phi: ," + ", ".join(f"{val:.6e}" for val in mcdc["technique"]["ww"][idx_census-1,:,0,0]) + "\n")
+                    f.write("ww : ," + ", ".join(f"{val:.6e}" for val in (mcdc["technique"]["ww"][idx_census-1,:,0,0]/np.max(mcdc["technique"]["ww"][idx_census-1,:,0,0])*(1-epsilon)+epsilon)) + "\n")
 
-    # Previous timestep weight windows
-    elif mcdc["technique"]["ww_auto"] == 1:
-        file = 'ww_data_previous.csv'
-        method = "Previous timestep"
+        if mcdc["technique"]["ww_auto"] == 1:
+            file = 'ww_data_previous.csv'
+            # Previous timestep method
+            mcdc["technique"]["ww"][idx_census-1,:,0,0] = flux/np.max(flux)
 
-        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = flux / np.max(flux)
-        data = {
-            "phi n-1": flux,
-            "ww": flux / np.max(flux) * (1 - epsilon) + epsilon
-        }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = flux
+            # Write output to dump file
+            if dump and rank == 0:
+                    t = mcdc["tally"]["mesh"]["t"]
+                    x = mcdc["tally"]["mesh"]["x"]
+                    x_mid = 0.5 * (x[:-1] + x[1:])
+                    if idx_census == 2:
+                        f = open(file,"w")
+                        f.write("Weight Window Output"+"\n Method: Previous timestep\nWindow width,"+str(width)+"\nEpsilon,"+str(epsilon)+"\n")
+                    else:
+                        f = open(file,"a")
+                    f.write("\ntimestep,"+str(idx_census)+'\nSim Time,'+str(t[idx_census])+',dt:,'+str(t[idx_census]-t[idx_census-1])+'\n')
+                    f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
+                    f.write("phi n-1: ," + ", ".join(f"{val:.6e}" for val in flux) + "\n")
+                    f.write("ww : ," + ", ".join(f"{val:.6e}" for val in (flux/np.max(flux)*(1-epsilon)+epsilon)) + "\n")
 
-    # Alpha approximation weight windows
-    elif mcdc["technique"]["ww_auto"] in [2, 2.5]:
-        file = 'ww_data_alpha.csv'
+        elif (mcdc["technique"]["ww_auto"] == 2 or mcdc["technique"]["ww_auto"] == 2.5):
+            # Alpha approximation
+            file = 'ww_data_alpha.csv'
+            old_flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_census-3])/N_particle
+            old_flux /= dx * dt
 
-        old_flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_n2]) / N_particle
-        # Normalizing tallies 
-        old_flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
-
-        alpha = np.ones_like(flux)
-        mask = old_flux != 0
-        alpha[mask] = np.log(flux[mask] / old_flux[mask])
-        alpha /= dt
-
-        if mcdc["technique"]["ww_auto"] == 2.5:
-            v = mcdc["materials"][0]["speed"][0]
-            nusigf = mcdc["materials"][0]["nu_f"][0] * mcdc["materials"][0]["fission"][0]
-            siga = mcdc["materials"][0]["capture"][0]
-            gamma = -v * (nusigf - siga)
-            alpha[alpha > -gamma] = -gamma
-            method = "Gamma limited alpha approximation"
-        else:
-            method = "Alpha approximation"
-
-        new_flux = flux * np.exp(alpha * dt)
-        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = new_flux / np.max(new_flux)
-        data = {
-            "alpha": alpha,
-            "phi tilde": new_flux,
-            "phi n-1": flux,
-            "phi n-2": old_flux,
-            "ww": new_flux / np.max(new_flux) * (1 - epsilon) + epsilon
-        }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = flux
-        mcdc["technique"]["ww_alpha"][idx_n0, :, 0, 0] = old_flux
-
-    # Hybrid weight windows
-    elif mcdc["technique"]["ww_auto"] == 4:
-        method = "hybrid"
-
-        file = 'ww_data_hybrid.csv'
-
-        # Setting up deterministic problem
-        det = mcdc["technique"]["deterministic"]
-        mesh = det["mesh"]
-        Nt = len(mesh["t"]) - 1
-        Nx = len(mesh["x"]) - 1
-        Ny = len(mesh["y"]) - 1
-        Nz = len(mesh["z"]) - 1
-
-
-        Sigma_t = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0,:]))
-        Sigma_s = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0,:]))
-        Sigma_f = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0,:]))
-        materials = mcdc["materials"]
-        for i in range(len(Sigma_t)):
-            mat_idx = np.squeeze(det["material_idx"])[idx_n0,:][i]
-            Sigma_t[i] = materials[mat_idx]["capture"][0]+ materials[mat_idx]["scatter"][0]
-            Sigma_s[i] = materials[mat_idx]["scatter"][0]
-            Sigma_f[i] = materials[mat_idx]["fission"][0]
-        # Create cross section class
-        cross_sections = CrossSections(Sigma_t, Sigma_s, Sigma_f, nu=2.3)
-        # Create deterministic mesh class
-        mesh = Mesh(Nx, dx, Nt, dt)
-        # Create discretized source class
-        source = np.squeeze(det["source"])[idx_n0,:]
-        source_term = Source(source, v=1.0, lb=1.0, rb=0.0)
-        # Create the problem class
-        problem = Problem(cross_sections, mesh, source_term)
-
-        # Adjust shape of flux and current
-        current_tally = np.copy(np.squeeze(mcdc["tally"]["score"]["current"]["mean"])[idx_n1][:,0])
-        current_tally *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
-
-        current = np.zeros(len(current_tally)+1)
-        current[1:-1] = (current_tally[1:]+current_tally[:-1])/2
-        current[0] = current_tally[0]     
-        current[-1] = current_tally[-1]
-
-        flux_det = np.zeros(len(flux)+2)
-        flux_det[1:-1] = flux
-        flux_det[0] = flux[0]
-        flux_det[-1] = flux[-1]
-
-        # Creating initial condition state class
-        old_state = State(flux_det,current)
-        # Adding Second moment factors 
-        F_tally = np.copy(np.squeeze(mcdc["tally"]["score"]["second_moment"]["mean"])[idx_n1][:,0])
-        F_tally *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
-        F = np.zeros(len(flux)+2)
-        F[1:-1] = F_tally
-        F[0] = F_tally[0]
-        F[-1] = F_tally[-1]
-        old_state.F = F
-
-        # Solve SM equations for solution state on next timestep
-        new_state = losm_timestep(old_state,old_state,problem)
-        new_flux = new_state.flux[1:-1]
-        new_current = new_state.current[:-1]
-
-        # Getting diffusion solution
-        old_state.F = np.zeros_like(F)
-        diff_state = losm_timestep(old_state,old_state,problem)
-        diff_flux = diff_state.flux[1:-1]
-        diff_current = diff_state.current[:-1]
-
-
-        # Assign weight windows according to new flux
-        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = new_flux/np.max(new_flux)
-        data = {
-            "phi tilde": new_flux,
-            "phi n-1": flux,
-            "ww": new_flux/np.max(new_flux)
-        }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = new_flux
-
-        import matplotlib.pyplot as plt
-        import os 
-        from mpi4py import MPI
-        rank = MPI.COMM_WORLD.Get_rank()
-        if rank == 0:
-            fig, (ax1, ax2,ax3) = plt.subplots(1, 3, figsize=(12, 6))
+            alpha = np.zeros_like(flux)
+            alpha[old_flux!=0] = np.log(np.divide(flux[old_flux!=0],old_flux[old_flux!=0]))
+            alpha[old_flux==0] = 1
+            alpha /= dt
             
-            # Plot settings for ax1
-            ax1.grid()
-            ax1.set_xlabel(r"$x$")
-            ax1.set_title(r"$\bar{\phi}$")
-            ax1.set_xlim(0, np.max(x))
-            phi_mc, = ax1.plot(x_mid,flux, "b", label="Monte Carlo")
-            phi_sm, = ax1.plot(x_mid,new_flux, "r", label="Second Moment")
-            phi_diff, = ax1.plot(x_mid,diff_flux, "g", label="Diffusion")
-            ax1.legend()
+            if mcdc["technique"]["ww_auto"] == 2.5:
+                method = "Gamma limited alpha approximation\nWindow width,"+str(width)+"\nEpsilon,"+str(epsilon)
+                # Alpha limiting
+                v = mcdc["materials"][0]["speed"][0]
+                nusigf = mcdc["materials"][0]["nu_f"][0] * mcdc["materials"][0]["fission"][0]
+                siga = mcdc["materials"][0]["capture"][0]
+                gamma = -v*(nusigf-siga)
+                alpha[alpha>-gamma] = -gamma
+            else:
+                method = "Alpha approximation\nWindow width,"+str(width)+"\nEpsilon,"+str(epsilon)
 
-            ax2.grid()
-            ax2.set_xlabel(r"$x$")
-            ax2.set_title(r"$J$")
-            ax2.set_xlim(0, np.max(x))
-            J_mc, = ax2.plot(x_mid, current_tally, "b", label="Monte Carlo")
-            J_sm, = ax2.plot(x_mid, new_current, "r", label="Second Moment")
-            J_diff, = ax2.plot(x_mid, diff_current, "g", label="Diffusion")
-            ax2.legend()
+            new_flux =flux*np.exp(alpha*dt)
+            mcdc["technique"]["ww"][idx_census-1,:,0,0] = new_flux/np.max(new_flux)
 
-            ax3.grid()
-            ax3.set_xlabel(r"$x$")
-            ax3.set_title(r"$F$")
-            ax3.set_xlim(0, np.max(x))
-            J_mc, = ax3.plot(x_mid, F[1:-1], "b")
-            if not os.path.isdir('figs'):
-                os.mkdir('figs')
-            plt.savefig("figs/hybrid"+str(idx_n0)+".png")
-
-    write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
-
-# ==============================================================================
-# Hybrid Methods
-# ==============================================================================
-
-# Classes ------------------------------------------------------------------------
-
-class CrossSections:
-    def __init__(self, Sigma_t, Sigma_s, Sigma_f, nu):
-        self.Sigma_t = Sigma_t
-        self.Sigma_s = Sigma_s
-        self.Sigma_f = Sigma_f
-        self.nu = nu
-
-class Quadrature:
-    def __init__(self, mu, w):
-        self.mu = mu
-        self.w = w
-        self.N_mu = len(mu)
-
-class Mesh:
-    def __init__(self, Nx, dx, Nt, dt,quadrature=None):
-        self.dx = dx
-        self.Nx = Nx
-        self.dt = dt
-        self.Nt = Nt
-        self.quad = quadrature
-        x_edge = np.zeros(Nx+1)
-        for i in range(1,Nx+1):
-            x_edge[i] = x_edge[i-1]+dx[i-1]
-        x = np.zeros(Nx+2)
-        x[1:-1] = x_edge[1:]-0.5*dx
-        x[0] = x_edge[0]
-        x[-1] = x_edge[-1]
-        self.x = x
-        self.x_edge = x_edge
-        t = np.zeros(Nt+1)
-        for i in range(1,Nt+1):
-            t[i] = t[i-1]+dt
-        self.t = t
-
-class Source:
-    def __init__(self, q, v,lb,rb):
-        self.q = q
-        self.v = v
-        self.lb = lb
-        self.rb = rb
-
-class Problem:
-    def __init__(self, cross_sections, mesh, source):
-        self.xs = cross_sections
-        self.mesh = mesh
-        self.source = source
-
-class iter_data:
-    def __init__(self, n_iter,epsilon = 1e-10, n_max = 1000):
-        self.n_iter = n_iter
-        self.difference= []
-        self.epsilon = epsilon
-        self.n_max = n_max
-
-class State:
-    def __init__(self, flux, current):
-        self.flux = flux
-        self.current = current
-
-        self.psi_edge = []
-        self.psi_bar = []
-        self.F = np.zeros_like(flux)
-        self.F_edge = np.zeros_like(current)
-        self.Pl = 0.0
-        self.Pr = 0.0
-        self.residual = []
-        self.iterations = []
-
-def hybrid_preprocess(mcdc):
-    # generate material index
-    hybrid_generate_material_idx(mcdc)
-    hybrid_prepare_source(mcdc)
+            if dump and rank == 0:
+                    t = mcdc["tally"]["mesh"]["t"]
+                    x = mcdc["tally"]["mesh"]["x"]
+                    x_mid = 0.5 * (x[:-1] + x[1:])
+                    if idx_census == 2:
+                        f = open(file,"w")
+                        f.write("Weight Window Output"+"\n Method: "+method+"\n")
+                    else:
+                        f = open(file,"a")
+                    f.write("\ntimestep,"+str(idx_census)+'\nSim Time,'+str(t[idx_census])+',dt:,'+str(t[idx_census]-t[idx_census-1])+'\n')
+                    f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
+                    f.write("alpha: ," + ", ".join(f"{val:.6e}" for val in alpha) + "\n")
+                    f.write("phi tilde: ," + ", ".join(f"{val:.6e}" for val in new_flux) + "\n")
+                    f.write("phi n-1: ," + ", ".join(f"{val:.6e}" for val in flux) + "\n")
+                    f.write("phi n-2: ," + ", ".join(f"{val:.6e}" for val in old_flux) + "\n")
+                    f.write("ww : ," + ", ".join(f"{val:.6e}" for val in (new_flux/np.max(new_flux)*(1-epsilon)+epsilon)) + "\n")
 
 
-
-def hybrid_generate_material_idx(mcdc):
-    """
-    This algorithm is meant to loop through every spatial cell of the
-    determinstic mesh and assign a material index according to the material_ID at
-    the center of the cell.
-
-    Therefore, the whole cell is treated as the material located at the
-    center of the cell, regardless of whethere there are more materials
-    present.
-
-    A crude but quick approximation.
-    """
-    det = mcdc["technique"]["deterministic"]
-    mesh = det["mesh"]
-    Nt = len(mesh["t"]) - 1
-    Nx = len(mesh["x"]) - 1
-    Ny = len(mesh["y"]) - 1
-    Nz = len(mesh["z"]) - 1
-    dx = dy = dz = 1
-    # variables for cell finding functions
-    trans_struct = adapt.local_translate()
-    trans = trans_struct["values"]
-    # create particle to utilize cell finding functions
-    P_temp = adapt.local_particle()
-    # set default attributes
-    P_temp["alive"] = True
-    P_temp["material_ID"] = -1
-    P_temp["cell_ID"] = -1
-
-    x_mid = 0.5 * (mesh["x"][1:] + mesh["x"][:-1])
-    y_mid = 0.5 * (mesh["y"][1:] + mesh["y"][:-1])
-    z_mid = 0.5 * (mesh["z"][1:] + mesh["z"][:-1])
-
-    # loop through every cell
-    for t in range(Nt):
-        for i in range(Nx):
-            x = x_mid[i]
-            for j in range(Ny):
-                y = y_mid[j]
-                for k in range(Nz):
-                    z = z_mid[k]
-
-                    # assign cell center position
-                    P_temp["t"] = t
-                    P_temp["x"] = x
-                    P_temp["y"] = y
-                    P_temp["z"] = z
-
-                    # set cell_ID
-                    P_temp["cell_ID"] = get_particle_cell(P_temp, 0, trans, mcdc)
-
-                    # set material_ID
-                    material_ID = get_particle_material(P_temp, mcdc)
-
-                    # assign material index
-                    mcdc["technique"]["deterministic"]["material_idx"][t, i, j, k] = material_ID
-
-
-def hybrid_prepare_source(mcdc):
-    """
-    Iterates through all spatial cells to calculate the deterministic source. 
-    """
-    det = mcdc["technique"]["deterministic"]
-
-    mesh = det["mesh"]
-    Nt = len(mesh["t"]) - 1
-    Nx = len(mesh["x"]) - 1
-    Ny = len(mesh["y"]) - 1
-    Nz = len(mesh["z"]) - 1
-    x_mid = 0.5 * (mesh["x"][1:] + mesh["x"][:-1])
-    y_mid = 0.5 * (mesh["y"][1:] + mesh["y"][:-1])
-    z_mid = 0.5 * (mesh["z"][1:] + mesh["z"][:-1])
-    # calculate source for every cell and group in the iqmc_mesh
-    # loop through every cell
-    for t in range(Nt):
-        for i in range(Nx):
-            x = x_mid[i]
-            for j in range(Ny):
-                y = y_mid[j]
-                for k in range(Nz):
-                    z = z_mid[k]
-                    for source in mcdc["sources"]:
-                        if source["box"] == 0:
-                            if x == source["x"] and y == source["y"] and x == source["y"]:
-                                det["source"][:,t,i,j,k] = source["prob"]
-                        else:
-                            in_x = source["box_x"][0] <= x <= source["box_x"][1]
-                            in_y = source["box_y"][0] <= y <= source["box_y"][1]
-                            in_z = source["box_z"][0] <= z <= source["box_z"][1]
-                            if in_x and in_y and in_z:
-                                det["source"][:,t,i,j,k] = source["prob"]
-   
-    
-
-def losm_timestep(current_state, previous_state, problem):
-    """
-    Perform one timestep of the LOSM method using TDMA.
-
-    Parameters:
-    current_state (State): Current state of the system containing flux, current, F, Pl, and Pr.
-    previous_state (State): Previous state of the system containing flux and current.
-    problem (Problem): Problem parameters containing cross-sections, source term, mesh, and quadrature.
-    J_in_left (float): Inflow current at the left boundary.
-    J_in_right (float): Inflow current at the right boundary.
-    v (float): Speed of neutrons. Default is 1.0.
-
-    Returns:
-    State: Updated state with new scalar flux and current.
-    """
-    phi_prev = np.copy(previous_state.flux)[1:-1]
-    J_prev = previous_state.current
-
-    q = problem.source.q
-    dx = problem.mesh.dx
-    dt = problem.mesh.dt
-    Nx = problem.mesh.Nx
-    Nt = problem.mesh.Nt
-    v = problem.source.v
-    Sigma_t = problem.xs.Sigma_t + 1/(v*dt)
-    Sigma_s = problem.xs.Sigma_s
-    Sigma_f = problem.xs.Sigma_f
-    nu = problem.xs.nu
-    left_bc = problem.source.lb
-    right_bc = problem.source.rb
-    
-    dx_edge = np.zeros(Nx+1)
-    dx_edge[1:-1] = (dx[:-1]+dx[1:])/2
-    dx_edge[0] = dx[0]/2
-    dx_edge[-1] = dx[-1]/2
-
-    Sigma_t_edge = np.zeros(Nx+1)
-    Sigma_t_edge[1:-1] = (Sigma_t[:-1]*dx[:-1]+Sigma_t[1:]*dx[1:])/(dx[:-1]+dx[1:])
-    Sigma_t_edge[0] = Sigma_t[0]
-    Sigma_t_edge[-1] = Sigma_t[-1]
-
-    F = current_state.F
-    Pl = current_state.Pl
-    Pr = current_state.Pr
-
-    q0 = q + phi_prev/(v*dt)
-    q1 = J_prev/(v*dt)
-    
-    # Coefficients for the tridiagonal matrix
-    a = np.zeros(Nx+1)
-    b = np.zeros(Nx+2)
-    c = np.zeros(Nx+1)
-    d = np.zeros(Nx+2)
-    for i in range(0, Nx):
-        a[i] = -1/(3*Sigma_t_edge[i]*dx_edge[i])
-        b[i+1] = 1/(3*Sigma_t_edge[i]*dx_edge[i]) + 1/(3*Sigma_t_edge[i+1]*dx_edge[i+1]) +(Sigma_t[i]-Sigma_s[i]-nu*Sigma_f[i])*dx[i]
-        c[i+1] = -1/(3*Sigma_t_edge[i+1]*dx_edge[i+1])
-        d[i+1] = q0[i]*dx[i] - (F[i+2]-F[i+1])/(Sigma_t_edge[i+1]*dx_edge[i+1]) + (F[i+1]-F[i])/(Sigma_t_edge[i]*dx_edge[i]) \
-            + q1[i]/Sigma_t_edge[i] - q1[i+1]/Sigma_t_edge[i+1]
-
-    # Boundary conditions
-    # Vacuum
-    if left_bc == 0:
-        b[0] = 1/(3*Sigma_t_edge[0]*dx_edge[0])+(Sigma_t[0]-Sigma_s[0]-nu*Sigma_f[0])*dx[0]
-        c[0] = -1/(6*Sigma_t_edge[0]*dx_edge[0])
-        d[0] = q0[0]*dx[0] + (F[1]-F[0])/(Sigma_t_edge[0]*dx_edge[0])+ q1[0]/Sigma_t_edge[0] + Pl
-    #Refl
-    elif left_bc == 1:
-        b[0] = 1/(3*Sigma_t_edge[0]*dx[0])+(Sigma_t[0]-Sigma_s[0]-nu*Sigma_f[0])*dx[0]
-        c[0] = -1/(3*Sigma_t_edge[0]*dx[0])
-        d[0] = q0[0]*dx[0] + (F[1]-F[0])/(Sigma_t_edge[0]*dx_edge[0])+ q1[0]/Sigma_t_edge[0]
-
-    if right_bc == 0:  
-        a[-1] = -1/(6*Sigma_t[-1]*dx[-1])
-        b[-1] = 1/(3*Sigma_t[-1]*dx[-1])-(Sigma_t[-1]-Sigma_s[-1]-nu*Sigma_f[-1])*dx[-1]
-        d[-1] = q0[-1]*dx[-1] + (F[-1]-F[-2])/(Sigma_t[-1]*dx[-1])+ q1[-1]/Sigma_t[-1] - Pr
-
-    elif right_bc == 1:
-        a[-1] = -1/(3*Sigma_t[-1]*dx[-1])
-        b[-1] = 1/(3*Sigma_t[-1]*dx[-1])-(Sigma_t[-1]-Sigma_s[-1]-nu*Sigma_f[-1])*dx[-1]
-        d[-1] = q0[-1]*dx[-1] + (F[-1]-F[-2])/(Sigma_t[-1]*dx[-1])+ q1[-1]/Sigma_t[-1] 
-  
-    # Solve the tridiagonal system using TDMA (Thomas algorithm)
-
-    phi = tdma(a,b,c, d)
-
-    
-    # Update current using the updated scalar flux
-
-    J = np.zeros(Nx+1)
-    if left_bc == 0:
-        J[0] = (phi[0]-phi[1])/(3*Sigma_t_edge[0]*dx_edge[0]) + q1[0]/Sigma_t_edge[0] + (F[1]-F[0])/(Sigma_t_edge[0]*dx_edge[0]) 
-        #J[0] = -0.5*phi[0]+Pl
-    elif left_bc == 1:
-        J[0] = 0
-    if right_bc == 0:
-        J[-1] = (phi[-2]-phi[-1])/(3*Sigma_t_edge[-1]*dx_edge[-1]) + q1[-1]/Sigma_t_edge[-1] + (F[-1]-F[-2])/(Sigma_t_edge[-1]*dx_edge[-1]) 
-        #J[-1] = 0.5*phi[-1]-Pr
-    elif right_bc == 1:    
-        J[-1] = 0
-    for i in range(1, Nx):
-        J[i] = (phi[i]-phi[i+1])/(3*Sigma_t_edge[i]*dx_edge[i]) + q1[i]/Sigma_t_edge[i] + (F[i+1]-F[i])/(Sigma_t_edge[i]*dx_edge[i]) 
-
-
-    res_balance = J[1:] - J[:-1] + dx *((Sigma_t-Sigma_s-nu*Sigma_f)*phi[1:-1] - q0)
-    res_sm = (1/3)*(phi[1:]-phi[:-1]) + Sigma_t_edge*dx_edge*J-q1*dx_edge+F[:-1]-F[1:]
-    res_lb = J[0] + 0.5*phi[0] - Pl
-    res_rb = J[-1] - 0.5*phi[-1] + Pr
-
-    residual = [res_balance,res_sm,res_lb,res_rb]
-    new_state = State(phi,J)
-    new_state.residual = residual
-    new_state.F = F
-    new_state.Pl = Pl
-    new_state.Pr = Pr
-    return new_state
-
-
-## Tri Diagonal Matrix Algorithm(a.k.a Thomas algorithm) solver
-def tdma(a, b, c, d):
-    '''
-    TDMA solver, a b c d can be NumPy array type or Python list type.
-    refer to http://en.wikipedia.org/wiki/Tridiagonal_matrix_algorithm
-    and to http://www.cfd-online.com/Wiki/Tridiagonal_matrix_algorithm_-_TDMA_(Thomas_algorithm)
-    '''
-    nf = len(d) # number of equations
-    ac, bc, cc, dc = map(np.array, (a, b, c, d)) # copy arrays
-    for it in range(1, nf):
-        mc = ac[it-1]/bc[it-1]
-        bc[it] = bc[it] - mc*cc[it-1] 
-        dc[it] = dc[it] - mc*dc[it-1]
-        	    
-    xc = bc
-    xc[-1] = dc[-1]/bc[-1]
-
-    for il in range(nf-2, -1, -1):
-        xc[il] = (dc[il]-cc[il]*xc[il+1])/bc[il]
-
-    return xc
-
-                   
 
 # ==============================================================================
 # Quasi Monte Carlo

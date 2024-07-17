@@ -669,6 +669,9 @@ score_list = (
     "total",
     "current",
     "eddington",
+    "second_moment",
+    "tracklength_tally",
+    "particle_density",
     "exit",
 )
 
@@ -711,6 +714,9 @@ def make_type_tally(input_deck):
         ["total", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
         ["current", (Ns, Ng, Nt, Nx, Ny, Nz, 3)],
         ["eddington", (Ns, Ng, Nt, Nx, Ny, Nz, 6)],
+        ["second_moment", (Ns, Ng, Nt, Nx, Ny, Nz, 9)],
+        ["tracklength_tally", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
+        ["particle_density", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
         ["exit", (Ns, Ng, Nt, 2, Ny, Nz, Nmu, N_azi)],
     ]
 
@@ -866,18 +872,41 @@ def make_type_technique(input_deck):
 
     # Mesh
     mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww_mesh"])
+
     struct += [("ww_mesh", mesh)]
     struct += [("ww_width", float64)]
+    struct += [("ww_epsilon", float64)]
+    struct += [("ww_auto", float64)]
 
     # Window
     struct += [("ww", float64, (Nt, Nx, Ny, Nz))]
-
+    struct += [("ww_alpha", float64, (Nt, Nx, Ny, Nz))]
+    struct += [("ww_phi_tilde", float64, (Nt, Nx, Ny, Nz))]
     # =========================================================================
     # Weight Roulette
     # =========================================================================
 
     # Constants
     struct += [("wr_threshold", float64), ("wr_survive", float64)]
+
+
+    # =========================================================================
+    # Hybrid techniques
+    # =========================================================================
+    hybrid_list = []
+    # Mesh for deterministic material idx
+    if card["hybrid"]:
+        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi = make_type_mesh_(card["deterministic"]["mesh"])
+        Ng = G
+        N_dim = 6  # group, x, y, z, mu, phi
+    else:
+        Nx = Ny = Nz = Nt = Nmu = N_azi = N_particle = Ng = N_dim = 0
+
+    hybrid_list += [("material_idx", int64, (Nt, Nx, Ny, Nz))]
+    hybrid_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
+    hybrid_list += [("mesh", mesh)]
+    struct += [("deterministic", into_dtype(hybrid_list))]
+    struct += [("integrated_source", float64)]
 
     # =========================================================================
     # Quasi Monte Carlo
@@ -1066,6 +1095,9 @@ def make_type_uq_tally(input_deck):
         ["total", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
         ["current", (Ns, Ng, Nt, Nx, Ny, Nz, 3)],
         ["eddington", (Ns, Ng, Nt, Nx, Ny, Nz, 6)],
+        ["second_moment", (Ns, Ng, Nt, Nx, Ny, Nz, 2)],
+        ["tracklength_tally", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
+        ["particle_density", (Ns, Ng, Nt, Nx, Ny, Nz, Nmu, N_azi)],
         ["exit", (Ns, Ng, Nt, 2, Ny, Nz, Nmu, N_azi)],
     ]
 
@@ -1349,6 +1381,8 @@ def make_type_global(input_deck):
             ("runtime_simulation", float64),
             ("runtime_output", float64),
             ("runtime_bank_management", float64),
+            ("runtime_census", float64, (input_deck.setting["N_census"],)),
+            ("census_particles", float64, (input_deck.setting["N_census"],)),
             ("particle_track", float64, (N_track, 8)),
             ("particle_track_N", int64, (1,)),
             ("particle_track_history_ID", int64, (1,)),

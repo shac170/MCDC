@@ -31,6 +31,8 @@ class InputDeck:
             "total": False,
             "current": False,
             "eddington": False,
+            "tracklength_tally": False,
+            "particle_density": False,
             "exit": False,
             "mesh": make_card_mesh(),
         }
@@ -80,6 +82,8 @@ class InputDeck:
             "weight_window": False,
             "ww": np.ones([1, 1, 1, 1]),
             "ww_width": 2.5,
+            "ww_epsilon": 1e-2,
+            "ww_auto": 0,
             "ww_mesh": make_card_mesh(),
             "domain_decomposition": False,
             "dd_idx": 0,
@@ -91,6 +95,20 @@ class InputDeck:
             "wr_threshold": 0.0,
             "wr_survive": 1.0,
             "iQMC": False,
+            "hybrid": False,
+            "deterministic":  {
+                "material_idx":  np.ones([1, 1, 1, 1]),
+                "source":  np.ones([1, 1, 1, 1]),
+                "mesh": {
+                    "g": np.array([-INF, INF]),
+                    "t": np.array([-INF, INF]),
+                    "x": np.array([-INF, INF]),
+                    "y": np.array([-INF, INF]),
+                    "z": np.array([-INF, INF]),
+                    "mu": np.array([-1.0, 1.0]),
+                    "azi": np.array([-PI, PI]),
+                },
+            },
             "iqmc": {
                 "generator": "sobol",
                 "fixed_source_solver": "source_iteration",

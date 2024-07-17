@@ -1321,7 +1321,6 @@ def time_census(t):
     -------
         None (in-place card alterations).
     """
-
     # Remove census beyond the final tally time grid point
     while True:
         if t[-1] >= mcdc.input_deck.tally["mesh"]["t"][-1]:
@@ -1331,14 +1330,13 @@ def time_census(t):
 
     # Add the default, final census-at-infinity
     t = np.append(t, INF)
-
     # Set the time census parameters
     card = mcdc.input_deck.setting
     card["census_time"] = t
     card["N_census"] = len(t)
 
 
-def weight_window(x=None, y=None, z=None, t=None, window=None, width=None):
+def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsilon = 1e-2, auto=0):
     """
     Activate weight window variance reduction technique.
 
@@ -1369,6 +1367,9 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None):
     if width is not None:
         card["ww_width"] = width
 
+    card["ww_auto"] = auto
+    card["ww_epsilon"] = epsilon
+
     # Set mesh
     if x is not None:
         card["ww_mesh"]["x"] = x
@@ -1379,6 +1380,23 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None):
     if t is not None:
         card["ww_mesh"]["t"] = t
 
+    if window is None:
+        window_size = []
+        if t is not None:
+            Nt = len(t) - 1 
+            window_size.append(Nt)
+        if x is not None:
+            Nx = len(x) - 1
+            window_size.append(Nx)
+        if y is not None:
+            Ny = len(y) - 1
+            window_size.append(Ny)
+        if z is not None:
+            Nz = len(z) - 1
+            window_size.append(Nz)
+        window_size = np.array(window_size)
+        window = np.ones((window_size))
+        
     # Set window
     ax_expand = []
     if t is None:
@@ -1389,10 +1407,14 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None):
         ax_expand.append(2)
     if z is None:
         ax_expand.append(3)
+
     window /= np.max(window)
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
     card["ww"] = window
+    if auto == 4:
+        card["hybrid"] = True
+        card["deterministic"]["mesh"] = card["ww_mesh"]
 
     return card
 
