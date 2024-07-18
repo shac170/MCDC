@@ -606,6 +606,35 @@ def prepare():
         for name in type_.source.names:
             copy_field(mcdc["sources"][i], input_deck.sources[i], name)
 
+    # =========================================================================
+    # Hybrid techniques
+    # =========================================================================
+    # WW mesh
+    if input_deck.technique["hybrid"]:
+        for name in type_.mesh_names[:-1]:
+            copy_field(mcdc["technique"]["deterministic"]["mesh"], input_deck.technique["deterministic"]["mesh"], name)
+
+        kernel.hybrid_preprocess(mcdc)
+    normalization_factor = 0
+    for source in mcdc["sources"]:
+        if source["box"] == 0:
+            normalization_factor += source["prob"]
+        else:
+            dx = source["box_x"][1] - source["box_x"][0]
+            if dx == 0:
+                dx = 1
+            dy = source["box_y"][1] - source["box_y"][0]
+            if dy == 0:
+                dy = 1            
+            dz = source["box_z"][1] - source["box_z"][0]
+            if dz == 0:
+                dz = 1            
+            dt = source["time"][1] - source["time"][0]
+            if dt == 0:
+                dt = 1
+            normalization_factor += dx*dy*dz*dt*source["prob"]
+    mcdc["technique"]["integrated_source"] = normalization_factor
+
     # Normalize source probabilities
     tot = 1e-16
     for S in mcdc["sources"]:
@@ -842,8 +871,13 @@ def prepare():
         copy_field(mcdc["technique"]["ww_mesh"], input_deck.technique["ww_mesh"], name)
 
     # WW windows
-    mcdc["technique"]["ww"] = input_deck.technique["ww"]
+   
     mcdc["technique"]["ww_width"] = input_deck.technique["ww_width"]
+    mcdc["technique"]["ww_auto"] = input_deck.technique["ww_auto"]
+    mcdc["technique"]["ww_epsilon"] = input_deck.technique["ww_epsilon"]
+    mcdc["technique"]["ww"] = input_deck.technique["ww"]
+
+
 
     # =========================================================================
     # Weight roulette
@@ -1168,7 +1202,16 @@ def generate_hdf5(data, mcdc):
                 dict_to_h5group(
                     input_deck.technique, input_group.create_group("technique")
                 )
-
+            # Store deterministic problem
+            det = mcdc["technique"]["deterministic"]
+            f.create_dataset(
+                            "input_deck/deterministic/source",
+                            data=np.squeeze(det["source"]),
+                        )
+            f.create_dataset(
+                            "input_deck/deterministic/material_idx",
+                            data=np.squeeze(det["material_idx"]),
+                        )
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:
