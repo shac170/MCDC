@@ -716,7 +716,7 @@ def cell(region=None, fill=None, translation=(0.0, 0.0, 0.0)):
         global_.input_deck.regions.append(region)
 
     # Assign region
-    card.region_ID = region.ID
+    card.region_ID = 0# region.ID
 
     # Assign fill type and ID
     if fill.tag == "Material":
@@ -1326,11 +1326,11 @@ def time_census(t):
     """
 
     # Remove census beyond the final tally time grid point
-    while True:
-        if t[-1] >= global_.input_deck.tally["mesh"]["t"][-1]:
-            t = t[:-1]
-        else:
-            break
+    #while True:
+    #    if t[-1] >= global_.input_deck.tally["mesh"]["t"][-1]:
+    #        t = t[:-1]
+    #    else:
+    #        break
 
     # Add the default, final census-at-infinity
     t = np.append(t, INF)

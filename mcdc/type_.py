@@ -872,6 +872,7 @@ def make_type_technique(input_deck):
         ("implicit_capture", bool_),
         ("population_control", bool_),
         ("weight_window", bool_),
+        ("hybrid", bool_),
         ("weight_roulette", bool_),
         ("iQMC", bool_),
         ("IC_generator", bool_),
