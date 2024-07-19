@@ -555,8 +555,8 @@ def prepare():
     if input_deck.technique["hybrid"]:
         for name in type_.mesh_names[:-1]:
             copy_field(mcdc["technique"]["deterministic"]["mesh"], input_deck.technique["deterministic"]["mesh"], name)
-
         kernel.hybrid_preprocess(mcdc)
+
     normalization_factor = 0
     for source in mcdc["sources"]:
         if source["box"] == 0:
@@ -1118,12 +1118,12 @@ def generate_hdf5(mcdc):
 
             # Weight windows
             if mcdc["technique"]["weight_window"]:
-                # dump iQMC mesh
                 T = mcdc["technique"]
                 
                 # User input ww
                 if T["ww_auto"] == 0:
                     f.create_dataset("ww_data/windows", data=T["ww"])
+                    f.create_dataset("ww_data/phi_tilde", data=T["ww_phi_tilde"])
                 # Previous ww
                 elif T["ww_auto"] == 1:
                     f.create_dataset("ww_data/windows", data=T["ww"])
@@ -1133,7 +1133,11 @@ def generate_hdf5(mcdc):
                     f.create_dataset("ww_data/windows", data=T["ww"])
                     f.create_dataset("ww_data/alpha", data=T["ww_alpha"])
                     f.create_dataset("ww_data/phi_tilde", data=T["ww_phi_tilde"])
- 
+                elif T["ww_auto"] == 4:
+                    f.create_dataset("ww_data/windows", data=T["ww"])
+                    f.create_dataset("ww_data/phi_prev", data=T["ww_alpha"])
+                    f.create_dataset("ww_data/phi_tilde", data=T["ww_phi_tilde"])
+
             # Particle tracker
             if mcdc["setting"]["track_particle"]:
                 with h5py.File(mcdc["setting"]["output"] + "_ptrack.h5", "w") as f:

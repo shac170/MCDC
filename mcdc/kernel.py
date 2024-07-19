@@ -3486,7 +3486,7 @@ def write_output(file, idx_census, t, x_mid, data, method, epsilon, width):
             f.write(f"{key}: ," + ", ".join(f"{val:.6e}" for val in values) + "\n")
 
 def ww_auto(mcdc, dump=True):
-    idx_n0 = mcdc["idx_census"] 
+    idx_n0 = mcdc["idx_census"]
     idx_n1 = idx_n0 - 1
     idx_n2 = idx_n1 - 1 
 
@@ -3513,6 +3513,8 @@ def ww_auto(mcdc, dump=True):
             "analytic phi": mcdc["technique"]["ww"][idx_n0, :, 0, 0],
             "ww": mcdc["technique"]["ww"][idx_n0, :, 0, 0] / np.max(mcdc["technique"]["ww"][idx_n0, :, 0, 0]) * (1 - epsilon) + epsilon
         }
+        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = mcdc["technique"]["ww"][idx_n0, :, 0, 0]
+        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = mcdc["technique"]["ww"][idx_n0, :, 0, 0]/np.max(mcdc["technique"]["ww"][idx_n0, :, 0, 0])
 
     # Previous timestep weight windows
     elif mcdc["technique"]["ww_auto"] == 1:
@@ -3530,11 +3532,11 @@ def ww_auto(mcdc, dump=True):
     elif mcdc["technique"]["ww_auto"] in [2, 2.5]:
         file = 'ww_data_alpha.csv'
 
-        old_flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_n2]) / N_particle
-        # Normalizing tallies 
+        # Normalizing tallies
+        old_flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_n2])
         old_flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
 
-        alpha = np.ones_like(flux)
+        alpha = np.zeros_like(flux)
         mask = old_flux != 0
         alpha[mask] = np.log(flux[mask] / old_flux[mask])
         alpha /= dt
@@ -3558,8 +3560,8 @@ def ww_auto(mcdc, dump=True):
             "phi n-2": old_flux,
             "ww": new_flux / np.max(new_flux) * (1 - epsilon) + epsilon
         }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = flux
-        mcdc["technique"]["ww_alpha"][idx_n0, :, 0, 0] = old_flux
+        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = new_flux
+        mcdc["technique"]["ww_alpha"][idx_n0, :, 0, 0] = alpha
 
     # Hybrid weight windows
     elif mcdc["technique"]["ww_auto"] == 4:
@@ -3637,9 +3639,8 @@ def ww_auto(mcdc, dump=True):
         data = {
             "phi tilde": new_flux,
             "phi n-1": flux,
-            "ww": new_flux/np.max(new_flux)
+            "ww": new_flux / np.max(new_flux) * (1 - epsilon) + epsilon
         }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = new_flux
 
         import matplotlib.pyplot as plt
         import os 
@@ -3652,29 +3653,35 @@ def ww_auto(mcdc, dump=True):
             ax1.grid()
             ax1.set_xlabel(r"$x$")
             ax1.set_title(r"$\bar{\phi}$")
-            ax1.set_xlim(0, np.max(x))
+            ax1.set_xlim(np.min(x), np.max(x))
+            #ax1.set_ylim(np.min(new_flux)-0.1, np.max(new_flux)*1.1)
+            ax1.set_yscale("log")
             phi_mc, = ax1.plot(x_mid,flux, "b", label="Monte Carlo")
             phi_sm, = ax1.plot(x_mid,new_flux, "r", label="Second Moment")
             phi_diff, = ax1.plot(x_mid,diff_flux, "g", label="Diffusion")
-            ax1.legend()
+            fig.legend()
 
             ax2.grid()
             ax2.set_xlabel(r"$x$")
             ax2.set_title(r"$J$")
-            ax2.set_xlim(0, np.max(x))
+            ax2.set_xlim(np.min(x), np.max(x))
+            ax2.set_ylim(np.min(new_current)-0.1, np.max(new_current)*1.1)
             J_mc, = ax2.plot(x_mid, current_tally, "b", label="Monte Carlo")
             J_sm, = ax2.plot(x_mid, new_current, "r", label="Second Moment")
             J_diff, = ax2.plot(x_mid, diff_current, "g", label="Diffusion")
-            ax2.legend()
 
             ax3.grid()
             ax3.set_xlabel(r"$x$")
             ax3.set_title(r"$F$")
-            ax3.set_xlim(0, np.max(x))
+            ax3.set_xlim(np.min(x), np.max(x))
+            ax3.set_ylim(np.min(F)-0.1, np.max(F)*1.1)
             J_mc, = ax3.plot(x_mid, F[1:-1], "b")
             if not os.path.isdir('figs'):
                 os.mkdir('figs')
             plt.savefig("figs/hybrid"+str(idx_n0)+".png")
+
+        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = new_flux
+        mcdc["technique"]["ww_alpha"][idx_n0, :, 0, 0] = flux
 
     write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
 
@@ -3843,13 +3850,15 @@ def hybrid_prepare_source(mcdc):
                     for source in mcdc["sources"]:
                         if source["box"] == 0:
                             if x == source["x"] and y == source["y"] and x == source["y"]:
-                                det["source"][:,t,i,j,k] = source["prob"]
+                                if source["time"][1] > mesh["t"][t]:
+                                    det["source"][:,t,i,j,k] = source["prob"]
                         else:
-                            in_x = source["box_x"][0] <= x <= source["box_x"][1]
-                            in_y = source["box_y"][0] <= y <= source["box_y"][1]
-                            in_z = source["box_z"][0] <= z <= source["box_z"][1]
-                            if in_x and in_y and in_z:
-                                det["source"][:,t,i,j,k] = source["prob"]
+                            if source["time"][1] > mesh["t"][t]:
+                                in_x = source["box_x"][0] <= x <= source["box_x"][1]
+                                in_y = source["box_y"][0] <= y <= source["box_y"][1]
+                                in_z = source["box_z"][0] <= z <= source["box_z"][1]
+                                if in_x and in_y and in_z:
+                                    det["source"][:,t,i,j,k] = source["prob"]
    
     
 
