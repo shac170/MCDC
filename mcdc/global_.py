@@ -34,6 +34,7 @@ class InputDeck:
         self.lattices = []
         self.sources = []
         self.mesh_tallies = []
+        self.edge_tallies = []
         self.surface_tallies = []
 
         self.setting = {

@@ -2104,14 +2104,12 @@ def mesh_crossing_evaluate(P, mesh):
     # Shift backward
     shift_particle(P, -2 * SHIFT)
     t1, x1, y1, z1, outside1 = mesh_get_index(P, mesh)
-
     # Double shift forward
     shift_particle(P, 4 * SHIFT)
     t2, x2, y2, z2, outside2 = mesh_get_index(P, mesh)
-
     # Return particle to initial position
     shift_particle(P, -2 * SHIFT)
-
+    
     # Determine dimension crossed
     directions = []
 
@@ -2174,6 +2172,64 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
             score = flux * SigmaF
         tally_bin[TALLY_SCORE, idx + i] += score
 
+@njit
+def score_edge_tally(P, tally, data, mcdc):
+    tally_bin = data[TALLY]
+    material = mcdc["materials"][P["material_ID"]]
+    mesh = tally["filter"]
+    stride = tally["stride"]
+
+    # Get indices
+    s = P["sensitivity_ID"]
+    shift_particle(P, -SHIFT)
+    ix, iy, iz, it, directions = mesh_crossing_evaluate(P,mesh)
+    shift_particle(P, SHIFT)
+
+    if len(directions) == 0:
+        return
+    elif len(directions) == 2:
+        print("double crossing")
+        return
+    for dir in directions:
+        if dir == MESH_X:
+            if P["ux"] > 0:
+                ix += 1
+            mu = P["ux"]
+        if dir == MESH_Y:
+            if P["uy"] > 0:
+                iy += 1
+            mu = P["uy"]
+        if dir == MESH_Z:
+            if P["uz"] > 0:
+                iz += 1
+            mu = P["uz"]
+    
+    g, outside_energy = mesh_get_energy_index(P, mesh, mcdc["setting"]["mode_MG"])
+
+    # Outside grid?
+    if outside_energy:
+        return
+
+    flux = P["w"] / abs(mu)
+
+    # The tally index
+    idx = (
+        stride["tally"]
+        + s * stride["sensitivity"]
+        + g * stride["g"]
+        + it * stride["t"]
+        + ix * stride["x"]
+        + iy * stride["y"]
+        + iz * stride["z"]
+    )
+    for i in range(tally["N_score"]):
+        score_type = tally["scores"][i]
+        if score_type == SCORE_FLUX:
+            score = flux
+        elif score_type == SCORE_NET_CURRENT:
+            score = flux * mu
+
+        tally_bin[TALLY_SCORE, idx + i] += score
 
 @njit
 def score_surface_tally(P, surface, tally, data, mcdc):
@@ -2497,6 +2553,8 @@ def move_to_event(P, data, mcdc):
     if mcdc["cycle_active"]:
         for tally in mcdc["mesh_tallies"]:
             d_mesh = min(d_mesh, distance_to_mesh(P, tally["filter"], mcdc))
+        for tally in mcdc["edge_tallies"]:
+            d_mesh = min(d_mesh, distance_to_mesh(P, tally["filter"], mcdc))
 
     d_domain = INF
     if mcdc["cycle_active"] and mcdc["technique"]["domain_decomposition"]:
@@ -2555,6 +2613,11 @@ def move_to_event(P, data, mcdc):
 
     # Move particle
     move_particle(P, distance, mcdc)
+
+    # Score crossing tallies
+    if mcdc["cycle_active"] and (event & EVENT_MESH or event & EVENT_SURFACE or event & EVENT_LATTICE):
+        for tally in mcdc["edge_tallies"]:
+            score_edge_tally(P, tally, data, mcdc)
 
 
 @njit
@@ -2745,7 +2808,6 @@ def surface_crossing(P, data, prog):
         ID = surface["tally_IDs"][i]
         tally = mcdc["surface_tallies"][ID]
         score_surface_tally(P, surface, tally, data, mcdc)
-
     # Implement BC
     surface_bc(P, surface, trans)
 

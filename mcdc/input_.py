@@ -716,7 +716,7 @@ def cell(region=None, fill=None, translation=(0.0, 0.0, 0.0)):
         global_.input_deck.regions.append(region)
 
     # Assign region
-    card.region_ID = 0# region.ID
+    card.region_ID = region.ID
 
     # Assign fill type and ID
     if fill.tag == "Material":

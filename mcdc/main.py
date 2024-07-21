@@ -357,6 +357,7 @@ def prepare():
     type_.make_type_lattice(input_deck)
     type_.make_type_source(input_deck)
     type_.make_type_mesh_tally(input_deck)
+    type_.make_type_edge_tally(input_deck)
     type_.make_type_surface_tally(input_deck)
     type_.make_type_setting(input_deck)
     type_.make_type_uq(input_deck)
@@ -647,6 +648,7 @@ def prepare():
     # =========================================================================
 
     N_mesh_tally = len(input_deck.mesh_tallies)
+    N_edge_tally = len(input_deck.edge_tallies)
     N_surface_tally = len(input_deck.surface_tallies)
     tally_size = 0
 
@@ -723,7 +725,81 @@ def prepare():
         # Set tally stride and accumulate total tally size
         mcdc["mesh_tallies"][i]["stride"]["tally"] = tally_size
         tally_size += mcdc["mesh_tallies"][i]["N_bin"]
+    
+    # Edge tallies
+    for i in range(N_edge_tally):
+        # Direct assignment
+        copy_field(mcdc["edge_tallies"][i], input_deck.edge_tallies[i], "N_bin")
 
+        # Filters (variables with possible different sizes)
+        for name in ["x", "y", "z", "t", "mu", "azi", "g"]:
+            N = len(getattr(input_deck.edge_tallies[i], name))
+            mcdc["edge_tallies"][i]["filter"][name][:N] = getattr(
+                input_deck.edge_tallies[i], name
+            )
+
+        # Set tally scores
+        N_score = len(input_deck.edge_tallies[i].scores)
+        mcdc["edge_tallies"][i]["N_score"] = N_score
+        for j in range(N_score):
+            score_name = input_deck.edge_tallies[i].scores[j]
+            score_type = None
+            if score_name == "flux":
+                score_type = SCORE_FLUX
+            elif score_name == "total":
+                score_type = SCORE_TOTAL
+            elif score_name == "fission":
+                score_type = SCORE_FISSION
+            elif score_name == "net-current":
+                score_type = SCORE_NET_CURRENT
+            mcdc["edge_tallies"][i]["scores"][j] = score_type
+
+        # Filter grid sizes
+        N_sensitivity = input_deck.setting["N_sensitivity"]
+        Ns = 1 + N_sensitivity
+        if input_deck.technique["dsm_order"] == 2:
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+        Nmu = len(input_deck.edge_tallies[i].mu) 
+        N_azi = len(input_deck.edge_tallies[i].azi) 
+        Ng = len(input_deck.edge_tallies[i].g) 
+        Nx = len(input_deck.edge_tallies[i].x) 
+        Ny = len(input_deck.edge_tallies[i].y) 
+        Nz = len(input_deck.edge_tallies[i].z) 
+        Nt = len(input_deck.edge_tallies[i].t) 
+
+        # Update N_bin
+        mcdc["edge_tallies"][i]["N_bin"] *= Ns * N_score
+
+        # Filter strides
+        stride = N_score
+        if Nz > 1:
+            mcdc["edge_tallies"][i]["stride"]["z"] = stride
+            stride *= Nz
+        if Ny > 1:
+            mcdc["edge_tallies"][i]["stride"]["y"] = stride
+            stride *= Ny
+        if Nx > 1:
+            mcdc["edge_tallies"][i]["stride"]["x"] = stride
+            stride *= Nx
+        if Nt > 1:
+            mcdc["edge_tallies"][i]["stride"]["t"] = stride
+            stride *= Nt
+        if Ng > 1:
+            mcdc["edge_tallies"][i]["stride"]["g"] = stride
+            stride *= Ng
+        if N_azi > 1:
+            mcdc["edge_tallies"][i]["stride"]["azi"] = stride
+            stride *= N_azi
+        if Nmu > 1:
+            mcdc["edge_tallies"][i]["stride"]["mu"] = stride
+            stride *= Nmu
+        if Ns > 1:
+            mcdc["edge_tallies"][i]["stride"]["sensitivity"] = stride
+
+        # Set tally stride and accumulate total tally size
+        mcdc["edge_tallies"][i]["stride"]["tally"] = tally_size
+        
+        tally_size += mcdc["edge_tallies"][i]["N_bin"]
     # Surface tallies
     for i in range(N_surface_tally):
         # Direct assignment
@@ -1275,6 +1351,74 @@ def generate_hdf5(data, mcdc):
                     mean = score_tally_bin[TALLY_SUM]
                     sdev = score_tally_bin[TALLY_SUM_SQ]
 
+                    f.create_dataset(group_name + "mean", data=mean)
+                    f.create_dataset(group_name + "sdev", data=sdev)
+                    if mcdc["technique"]["uq"]:
+                        mc_var = score_tally_bin[TALLY_UQ_BATCH_VAR]
+                        tot_var = score_tally_bin[TALLY_UQ_BATCH]
+                        uq_var = tot_var - mc_var
+                        f.create_dataset(group_name + "uq_var", data=uq_var)
+
+            # Edge tallies
+            for ID, tally in enumerate(mcdc["edge_tallies"]):
+                if mcdc["technique"]["iQMC"]:
+                    break
+
+                mesh = tally["filter"]
+                f.create_dataset("tallies/edge_tally_%i/grid/t" % ID, data=mesh["t"])
+                f.create_dataset("tallies/edge_tally_%i/grid/x" % ID, data=mesh["x"])
+                f.create_dataset("tallies/edge_tally_%i/grid/y" % ID, data=mesh["y"])
+                f.create_dataset("tallies/edge_tally_%i/grid/z" % ID, data=mesh["z"])
+                f.create_dataset("tallies/edge_tally_%i/grid/mu" % ID, data=mesh["mu"])
+                f.create_dataset(
+                    "tallies/edge_tally_%i/grid/azi" % ID, data=mesh["azi"]
+                )
+                f.create_dataset("tallies/edge_tally_%i/grid/g" % ID, data=mesh["g"])
+
+                # Shape
+                N_sensitivity = input_deck.setting["N_sensitivity"]
+                Ns = 1 + N_sensitivity
+                if input_deck.technique["dsm_order"] == 2:
+                    Ns = (
+                        1
+                        + 2 * N_sensitivity
+                        + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+                    )
+                Nmu = len(mesh["mu"]) - 1
+                N_azi = len(mesh["azi"]) - 1
+                Ng = len(mesh["g"]) - 1
+                Nx = len(mesh["x"]) 
+                Ny = len(mesh["y"]) 
+                Nz = len(mesh["z"]) 
+                Nt = len(mesh["t"]) - 1
+                N_score = tally["N_score"]
+
+                if not mcdc["technique"]["uq"]:
+                    shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+                else:
+                    shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+
+                # Reshape tally
+                N_bin = tally["N_bin"]
+                start = tally["stride"]["tally"]
+                tally_bin = data[TALLY][:, start : start + N_bin]
+                tally_bin = tally_bin.reshape(shape)
+
+                # Roll tally so that score is in the front
+                tally_bin = np.rollaxis(tally_bin, 9, 0)
+
+                # Iterate over scores
+                for i in range(N_score):
+                    score_type = tally["scores"][i]
+                    score_tally_bin = np.squeeze(tally_bin[i])
+                    if score_type == SCORE_FLUX:
+                        score_name = "flux"
+                    elif score_type == SCORE_NET_CURRENT:
+                        score_name = "net-current"
+                    group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
+
+                    mean = score_tally_bin[TALLY_SUM]
+                    sdev = score_tally_bin[TALLY_SUM_SQ]
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
