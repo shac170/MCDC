@@ -940,17 +940,20 @@ def prepare():
     # =========================================================================
 
     # WW mesh
-    for name in type_.mesh_names[:-1]:
-        copy_field(
-            mcdc["technique"]["ww"]["mesh"], input_deck.technique["ww"]["mesh"], name
-        )
+    if input_deck.technique["weight_window"]:
+        for name in type_.mesh_names[:-1]:
+            copy_field(
+                mcdc["technique"]["ww"]["mesh"],
+                input_deck.technique["ww"]["mesh"],
+                name,
+            )
 
-    # WW windows
+        # WW windows
 
-    mcdc["technique"]["ww"]["width"] = input_deck.technique["ww"]["width"]
-    mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
-    mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
-    mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
+        mcdc["technique"]["ww"]["width"] = input_deck.technique["ww"]["width"]
+        mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
+        mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
+        mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
 
     # =========================================================================
     # Weight roulette
