@@ -98,7 +98,16 @@ def mesh_tally(
         score_checked = check_support(
             "score type",
             s,
-            ["flux", "total", "fission"],
+            ["flux", 
+             "total", 
+             "fission",
+             "sm-xx",
+             "sm-xy",
+             "sm-xz",
+             "sm-yy",
+             "sm-yz",
+             "sm-zz",
+             ],
         )
         card.scores.append(score_checked)
 
@@ -184,13 +193,21 @@ def edge_tally(
     N_azi = len(card.azi) - 1 
     Ng = len(card.g) - 1
     card.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
-    
+
     # Scores
     for s in scores:
         score_checked = check_support(
             "score type",
             s,
-            ["flux", "net-current"],
+            ["flux", 
+             "net-current",
+             "sm-xx",
+             "sm-xy",
+             "sm-xz",
+             "sm-yy",
+             "sm-yz",
+             "sm-zz",
+             ],
         )
         card.scores.append(score_checked)
 

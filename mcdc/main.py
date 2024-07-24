@@ -678,6 +678,8 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
+            elif score_name.split('-')[0] == "sm":
+                score_type = SCORE_SECOND_MOMENT
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -752,6 +754,9 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
+            elif score_name.split('-')[0] == "sm":
+                score_type = SCORE_SECOND_MOMENT
+                        
             mcdc["edge_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -944,14 +949,14 @@ def prepare():
 
     # WW mesh
     for name in type_.mesh_names[:-1]:
-        copy_field(mcdc["technique"]["ww_mesh"], input_deck.technique["ww_mesh"], name)
+        copy_field(mcdc["technique"]["ww"]["mesh"], input_deck.technique["ww"]["mesh"], name)
 
     # WW windows
    
-    mcdc["technique"]["ww_width"] = input_deck.technique["ww_width"]
-    mcdc["technique"]["ww_auto"] = input_deck.technique["ww_auto"]
-    mcdc["technique"]["ww_epsilon"] = input_deck.technique["ww_epsilon"]
-    mcdc["technique"]["ww"] = input_deck.technique["ww"]
+    mcdc["technique"]["ww"]["width"] = input_deck.technique["ww"]["width"]
+    mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
+    mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
+    mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
 
 
 
@@ -1469,6 +1474,31 @@ def generate_hdf5(data, mcdc):
                         tot_var = score_tally_bin[TALLY_UQ_BATCH]
                         uq_var = tot_var - mc_var
                         f.create_dataset(group_name + "uq_var", data=uq_var)
+
+            # weight windows
+            if mcdc["technique"]["weight_window"]:
+                # dump iQMC mesh
+                T = mcdc["technique"]
+                f.create_dataset("ww/grid/t", data=T["ww"]["mesh"]["t"])
+                f.create_dataset("ww/grid/x", data=T["ww"]["mesh"]["x"])
+                f.create_dataset("ww/grid/y", data=T["ww"]["mesh"]["y"])
+                f.create_dataset("ww/grid/z", data=T["ww"]["mesh"]["z"])
+                f.create_dataset("ww/center", data=T["ww"]["center"])
+                f.create_dataset("ww/width", data=T["ww"]["width"])
+                f.create_dataset("ww/epsilon", data=T["ww"]["epsilon"])
+                method = mcdc["technique"]["ww"]["auto"]
+                f.create_dataset("ww/method", data=method)
+                if method == 0:
+                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                elif method == 1:
+                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                elif method == 2:
+                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                    f.create_dataset("ww/alpha", data=T["ww"]["alpha"])
+                elif method == 3:
+                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                # dump x,y,z scalar flux across all groups
+
 
             # Eigenvalues
             if mcdc["setting"]["mode_eigenvalue"]:

@@ -2141,6 +2141,7 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
     mu, azi = mesh_get_angular_index(P, mesh)
     g, outside_energy = mesh_get_energy_index(P, mesh, mcdc["setting"]["mode_MG"])
 
+    
     # Outside grid?
     if outside or outside_energy:
         return
@@ -2170,6 +2171,8 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
         elif score_type == SCORE_FISSION:
             SigmaF = get_MacroXS(XS_FISSION, material, P, mcdc)
             score = flux * SigmaF
+        elif score_type == SCORE_SECOND_MOMENT:
+            score = flux * mu * mu
         tally_bin[TALLY_SCORE, idx + i] += score
 
 @njit
@@ -2186,7 +2189,23 @@ def score_edge_tally(P, tally, data, mcdc):
     shift_particle(P, SHIFT)
 
     if len(directions) == 0:
-        return
+        if abs(P["x"] - mesh["x"][0]) < 1/INF:
+            mu = P["ux"]
+        elif abs(P["x"] - mesh["x"][-1]) < 1/INF:
+            mu = P["ux"]
+            ix += 1
+        elif abs(P["y"] - mesh["y"][0]) < 1/INF:
+            mu = P["uy"]
+        elif abs(P["y"] - mesh["y"][-1]) < 1/INF:
+            mu = P["uy"]
+            iy += 1
+        elif abs(P["z"] - mesh["z"][0]) < 1/INF:
+            mu = P["uz"]
+        elif abs(P["z"] - mesh["z"][-1]) < 1/INF:
+            mu = P["uz"]
+            iz += 1
+        else:
+            return
     elif len(directions) == 2:
         print("double crossing")
         return
@@ -2203,7 +2222,7 @@ def score_edge_tally(P, tally, data, mcdc):
             if P["uz"] > 0:
                 iz += 1
             mu = P["uz"]
-    
+
     g, outside_energy = mesh_get_energy_index(P, mesh, mcdc["setting"]["mode_MG"])
 
     # Outside grid?
@@ -2228,6 +2247,8 @@ def score_edge_tally(P, tally, data, mcdc):
             score = flux
         elif score_type == SCORE_NET_CURRENT:
             score = flux * mu
+        elif score_type == SCORE_SECOND_MOMENT:
+            score = flux * mu * mu
 
         tally_bin[TALLY_SCORE, idx + i] += score
 
@@ -3469,23 +3490,23 @@ def weight_window(P, prog):
         P["alive"] = False
     else:
         # Get indices
-        t, x, y, z, outside = mesh_get_index(P, mcdc["technique"]["ww_mesh"])
+        t, x, y, z, outside = mesh_get_index(P, mcdc["technique"]["ww"]["mesh"])
 
         # Set target weight 
-        epsilon = mcdc["technique"]["ww_epsilon"]
+        epsilon = mcdc["technique"]["ww"]["epsilon"]
 
         # My method
         #w_target = (mcdc["technique"]["ww"][t, x, y, z])*(1-epsilon)+epsilon
 
         # Wollaber Modification
         epsi = 1e-4
-        window = mcdc["technique"]["ww"][t, x, y, z]*(1-epsi)+epsi
+        window = mcdc["technique"]["ww"]["center"][t, x, y, z]*(1-epsi)+epsi
         w_min = 0.01#np.min(window[window!=0])
         
         w_target = (window)*(1+(1/epsilon-1)*np.exp(-(window-w_min)/epsilon))
 
         # Window width
-        width = mcdc["technique"]["ww_width"]
+        width = mcdc["technique"]["ww"]["width"]
 
         # upper limit
         ulimit = w_target*width
@@ -3530,52 +3551,280 @@ def write_output(file, idx_census, t, x_mid, data, method, epsilon, width):
         for key, values in data.items():
             f.write(f"{key}: ," + ", ".join(f"{val:.6e}" for val in values) + "\n")
 
-def ww_auto(mcdc, dump=True):
+def get_flux(idx,mcdc,data):
+    for ID, tally in enumerate(mcdc["mesh_tallies"]):
+        if mcdc["technique"]["iQMC"]:
+            break
+
+        mesh = tally["filter"]
+
+        # Shape
+        N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
+        Ns = 1 + N_sensitivity
+        if mcdc["technique"]["dsm_order"] == 2:
+            Ns = (
+                1
+                + 2 * N_sensitivity
+                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+            )
+        Nmu = len(mesh["mu"]) - 1
+        N_azi = len(mesh["azi"]) - 1
+        Ng = len(mesh["g"]) - 1
+        Nx = len(mesh["x"]) - 1
+        Ny = len(mesh["y"]) - 1
+        Nz = len(mesh["z"]) - 1
+        Nt = len(mesh["t"]) - 1
+        N_score = tally["N_score"]
+
+        if not mcdc["technique"]["uq"]:
+            shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+        else:
+            shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+
+        # Reshape tally
+        N_bin = tally["N_bin"]
+        start = tally["stride"]["tally"]
+        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = tally_bin.reshape(shape)
+
+        # Roll tally so that score is in the front
+        tally_bin = np.rollaxis(tally_bin, 9, 0)
+
+        # Iterate over scores
+        for i in range(N_score):
+            score_type = tally["scores"][i]
+            score_tally_bin = np.squeeze(tally_bin[i])
+            if score_type == SCORE_FLUX:
+                mean = score_tally_bin[TALLY_SUM]
+                sdev = score_tally_bin[TALLY_SUM_SQ]
+                return mean[idx][:]
+
+def get_current(idx,mcdc,data):
+    for ID, tally in enumerate(mcdc["edge_tallies"]):
+        if mcdc["technique"]["iQMC"]:
+            break
+
+        mesh = tally["filter"]
+
+        # Shape
+        N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
+        Ns = 1 + N_sensitivity
+        if mcdc["technique"]["dsm_order"] == 2:
+            Ns = (
+                1
+                + 2 * N_sensitivity
+                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+            )
+        Nmu = len(mesh["mu"]) - 1
+        N_azi = len(mesh["azi"]) - 1
+        Ng = len(mesh["g"]) - 1
+        Nx = len(mesh["x"]) 
+        Ny = len(mesh["y"]) 
+        Nz = len(mesh["z"]) 
+        Nt = len(mesh["t"]) - 1
+        N_score = tally["N_score"]
+
+        if not mcdc["technique"]["uq"]:
+            shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+        else:
+            shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+
+        # Reshape tally
+        N_bin = tally["N_bin"]
+        start = tally["stride"]["tally"]
+        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = tally_bin.reshape(shape)
+
+        # Roll tally so that score is in the front
+        tally_bin = np.rollaxis(tally_bin, 9, 0)
+
+        # Iterate over scores
+        for i in range(N_score):
+            score_type = tally["scores"][i]
+            score_tally_bin = np.squeeze(tally_bin[i])
+            if score_type == SCORE_NET_CURRENT:
+                mean = score_tally_bin[TALLY_SUM]
+                sdev = score_tally_bin[TALLY_SUM_SQ]
+                return mean[idx][:,0,0]
+
+def get_state(idx,mcdc,data):
+    dt = abs(mcdc["technique"]["ww"]["mesh"]['t'][idx+1] - mcdc["technique"]["ww"]["mesh"]['t'][idx])
+    dx = abs(mcdc["technique"]["ww"]["mesh"]['x'][1:] - mcdc["technique"]["ww"]["mesh"]['x'][:-1])
+    N_particle = mcdc["setting"]["N_particle"]
+    # Setting up deterministic problem
+    det = mcdc["technique"]["deterministic"]
+    mesh = det["mesh"]
+    Nt = len(mesh["t"]) - 1
+    Nx = len(mesh["x"]) - 1
+    Ny = len(mesh["y"]) - 1
+    Nz = len(mesh["z"]) - 1
+    Sigma_t = np.zeros(len(np.squeeze(det["material_idx"])[idx,:]))
+    Sigma_s = np.zeros(len(np.squeeze(det["material_idx"])[idx,:]))
+    Sigma_f = np.zeros(len(np.squeeze(det["material_idx"])[idx,:]))
+    materials = mcdc["materials"]
+    for i in range(len(Sigma_t)):
+        mat_idx = np.squeeze(det["material_idx"])[idx,:][i]
+        Sigma_t[i] = materials[mat_idx]["capture"][0]+ materials[mat_idx]["scatter"][0]
+        Sigma_s[i] = materials[mat_idx]["scatter"][0]
+        Sigma_f[i] = materials[mat_idx]["fission"][0]
+    # Create cross section class
+    cross_sections = CrossSections(Sigma_t, Sigma_s, Sigma_f, nu=2.3)
+    # Create deterministic mesh class
+    mesh = Mesh(Nx, dx, Nt, dt)
+    # Create discretized source class
+    source = np.squeeze(det["source"])[idx,:]
+    source_term = Source(source, v=1.0, lb=1.0, rb=0.0)
+    # Create the problem class
+    problem = Problem(cross_sections, mesh, source_term)
+
+    # Get Tallies
+    for ID, tally in enumerate(mcdc["edge_tallies"]):
+        if mcdc["technique"]["iQMC"]:
+            break
+
+        mesh = tally["filter"]
+
+        # Shape
+        N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
+        Ns = 1 + N_sensitivity
+        if mcdc["technique"]["dsm_order"] == 2:
+            Ns = (
+                1
+                + 2 * N_sensitivity
+                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+            )
+        Nmu = len(mesh["mu"]) - 1
+        N_azi = len(mesh["azi"]) - 1
+        Ng = len(mesh["g"]) - 1
+        Nx = len(mesh["x"]) 
+        Ny = len(mesh["y"]) 
+        Nz = len(mesh["z"]) 
+        Nt = len(mesh["t"]) - 1
+        N_score = tally["N_score"]
+
+        if not mcdc["technique"]["uq"]:
+            shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+        else:
+            shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+
+        # Reshape tally
+        N_bin = tally["N_bin"]
+        start = tally["stride"]["tally"]
+        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = tally_bin.reshape(shape)
+
+        # Roll tally so that score is in the front
+        tally_bin = np.rollaxis(tally_bin, 9, 0)
+
+        # Iterate over scores
+        for i in range(N_score):
+            score_type = tally["scores"][i]
+            score_tally_bin = np.squeeze(tally_bin[i])
+            if score_type == SCORE_NET_CURRENT:
+                mean = score_tally_bin[TALLY_SUM]
+                J =  mean[idx][:,0,0]
+            elif score_type == SCORE_FLUX:
+                mean = score_tally_bin[TALLY_SUM]
+                phi_edge =  mean[idx][:,0,0]
+            elif score_type == SCORE_SECOND_MOMENT:
+                mean = score_tally_bin[TALLY_SUM]
+                SM_edge =  mean[idx][:,0,0]
+    for ID, tally in enumerate(mcdc["mesh_tallies"]):
+        if mcdc["technique"]["iQMC"]:
+            break
+
+        mesh = tally["filter"]
+
+        # Shape
+        N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
+        Ns = 1 + N_sensitivity
+        if mcdc["technique"]["dsm_order"] == 2:
+            Ns = (
+                1
+                + 2 * N_sensitivity
+                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+            )
+        Nmu = len(mesh["mu"]) - 1
+        N_azi = len(mesh["azi"]) - 1
+        Ng = len(mesh["g"]) - 1
+        Nx = len(mesh["x"]) - 1
+        Ny = len(mesh["y"]) - 1
+        Nz = len(mesh["z"]) - 1
+        Nt = len(mesh["t"]) - 1
+        N_score = tally["N_score"]
+
+        if not mcdc["technique"]["uq"]:
+            shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+        else:
+            shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+
+        # Reshape tally
+        N_bin = tally["N_bin"]
+        start = tally["stride"]["tally"]
+        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = tally_bin.reshape(shape)
+
+        # Roll tally so that score is in the front
+        tally_bin = np.rollaxis(tally_bin, 9, 0)
+
+        # Iterate over scores
+        for i in range(N_score):
+            score_type = tally["scores"][i]
+            score_tally_bin = np.squeeze(tally_bin[i])
+            if score_type == SCORE_FLUX:
+                mean = score_tally_bin[TALLY_SUM]
+                phi =  mean[idx][:]
+            elif score_type == SCORE_SECOND_MOMENT:
+                mean = score_tally_bin[TALLY_SUM]
+                SM =  mean[idx][:]           
+        
+    det_flux = np.zeros(len(phi)+2)
+    det_flux[1:-1] = phi* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    det_flux[0] = phi_edge[0]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    det_flux[-1] = phi_edge[-1]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+
+    F = np.zeros(len(phi)+2)
+    #F[1:-1] = SM* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    #F[0] = SM_edge[0]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    #F[-1] = SM_edge[-1]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+
+    current = J * mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+
+    # Creating initial condition state class
+    state = State(det_flux,current)
+    state.F = F
+    return state, problem
+
+def ww_auto(data,mcdc, dump=True):
     idx_n0 = mcdc["idx_census"] 
     idx_n1 = idx_n0 - 1
     idx_n2 = idx_n1 - 1 
 
-    dt = abs(mcdc["tally"]["mesh"]['t'][idx_n0] - mcdc["tally"]["mesh"]['t'][idx_n1])
-    dx = abs(mcdc["tally"]["mesh"]['x'][1:] - mcdc["tally"]["mesh"]['x'][:-1])
+    dt = abs(mcdc["technique"]["ww"]["mesh"]['t'][idx_n0] - mcdc["technique"]["ww"]["mesh"]['t'][idx_n1])
+    dx = abs(mcdc["technique"]["ww"]["mesh"]['x'][1:] - mcdc["technique"]["ww"]["mesh"]['x'][:-1])
     N_particle = mcdc["setting"]["N_particle"]
-
+    flux = get_flux(idx_n1,mcdc,data)
     # Normalizing tallies 
-    flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_n1])
     flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
 
     # Window width
-    width = mcdc["technique"]["ww_width"]
-    epsilon = mcdc["technique"]["ww_epsilon"]
+    width = mcdc["technique"]["ww"]["width"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
 
-    t = mcdc["tally"]["mesh"]["t"]
-    x = mcdc["tally"]["mesh"]["x"]
-    x_mid = 0.5 * (x[:-1] + x[1:])
+    method = mcdc["technique"]["ww"]["auto"]
+
     # User supplied weight windows
-    if mcdc["technique"]["ww_auto"] == 0:
-        file = 'ww_data_analytic.csv'
-        method = "Analytic"
-        data = {
-            "analytic phi": mcdc["technique"]["ww"][idx_n0, :, 0, 0],
-            "ww": mcdc["technique"]["ww"][idx_n0, :, 0, 0] / np.max(mcdc["technique"]["ww"][idx_n0, :, 0, 0]) * (1 - epsilon) + epsilon
-        }
-
+    if method == 0:
+        return
+    
     # Previous timestep weight windows
-    elif mcdc["technique"]["ww_auto"] == 1:
-        file = 'ww_data_previous.csv'
-        method = "Previous timestep"
-
-        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = flux / np.max(flux)
-        data = {
-            "phi n-1": flux,
-            "ww": flux / np.max(flux) * (1 - epsilon) + epsilon
-        }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = flux
+    elif method == 1:
+        mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = flux / np.max(flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = flux
 
     # Alpha approximation weight windows
-    elif mcdc["technique"]["ww_auto"] in [2, 2.5]:
-        file = 'ww_data_alpha.csv'
-
-        old_flux = np.copy(np.squeeze(mcdc["tally"]["score"]["flux"]["mean"])[idx_n2]) / N_particle
+    elif method == 2:
+        old_flux =  get_flux(idx_n2,mcdc,data)
         # Normalizing tallies 
         old_flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
 
@@ -3584,144 +3833,27 @@ def ww_auto(mcdc, dump=True):
         alpha[mask] = np.log(flux[mask] / old_flux[mask])
         alpha /= dt
 
-        if mcdc["technique"]["ww_auto"] == 2.5:
-            v = mcdc["materials"][0]["speed"][0]
-            nusigf = mcdc["materials"][0]["nu_f"][0] * mcdc["materials"][0]["fission"][0]
-            siga = mcdc["materials"][0]["capture"][0]
-            gamma = -v * (nusigf - siga)
-            alpha[alpha > -gamma] = -gamma
-            method = "Gamma limited alpha approximation"
-        else:
-            method = "Alpha approximation"
-
         new_flux = flux * np.exp(alpha * dt)
-        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = new_flux / np.max(new_flux)
-        data = {
-            "alpha": alpha,
-            "phi tilde": new_flux,
-            "phi n-1": flux,
-            "phi n-2": old_flux,
-            "ww": new_flux / np.max(new_flux) * (1 - epsilon) + epsilon
-        }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = flux
-        mcdc["technique"]["ww_alpha"][idx_n0, :, 0, 0] = old_flux
+        mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = new_flux / np.max(new_flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = new_flux
+        mcdc["technique"]["ww"]["alpha"][idx_n0, :, 0, 0] = alpha
 
     # Hybrid weight windows
-    elif mcdc["technique"]["ww_auto"] == 4:
-        method = "hybrid"
-
-        file = 'ww_data_hybrid.csv'
-
-        # Setting up deterministic problem
-        det = mcdc["technique"]["deterministic"]
-        mesh = det["mesh"]
-        Nt = len(mesh["t"]) - 1
-        Nx = len(mesh["x"]) - 1
-        Ny = len(mesh["y"]) - 1
-        Nz = len(mesh["z"]) - 1
-
-
-        Sigma_t = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0,:]))
-        Sigma_s = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0,:]))
-        Sigma_f = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0,:]))
-        materials = mcdc["materials"]
-        for i in range(len(Sigma_t)):
-            mat_idx = np.squeeze(det["material_idx"])[idx_n0,:][i]
-            Sigma_t[i] = materials[mat_idx]["capture"][0]+ materials[mat_idx]["scatter"][0]
-            Sigma_s[i] = materials[mat_idx]["scatter"][0]
-            Sigma_f[i] = materials[mat_idx]["fission"][0]
-        # Create cross section class
-        cross_sections = CrossSections(Sigma_t, Sigma_s, Sigma_f, nu=2.3)
-        # Create deterministic mesh class
-        mesh = Mesh(Nx, dx, Nt, dt)
-        # Create discretized source class
-        source = np.squeeze(det["source"])[idx_n0,:]
-        source_term = Source(source, v=1.0, lb=1.0, rb=0.0)
-        # Create the problem class
-        problem = Problem(cross_sections, mesh, source_term)
-
-        # Adjust shape of flux and current
-        current_tally = np.copy(np.squeeze(mcdc["tally"]["score"]["current"]["mean"])[idx_n1][:,0])
-        current_tally *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
-
-        current = np.zeros(len(current_tally)+1)
-        current[1:-1] = (current_tally[1:]+current_tally[:-1])/2
-        current[0] = current_tally[0]     
-        current[-1] = current_tally[-1]
-
-        flux_det = np.zeros(len(flux)+2)
-        flux_det[1:-1] = flux
-        flux_det[0] = flux[0]
-        flux_det[-1] = flux[-1]
+    elif method == 3:
 
         # Creating initial condition state class
-        old_state = State(flux_det,current)
-        # Adding Second moment factors 
-        F_tally = np.copy(np.squeeze(mcdc["tally"]["score"]["second_moment"]["mean"])[idx_n1][:,0])
-        F_tally *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
-        F = np.zeros(len(flux)+2)
-        F[1:-1] = F_tally
-        F[0] = F_tally[0]
-        F[-1] = F_tally[-1]
-        old_state.F = F
+        old_state, problem = get_state(idx_n1,mcdc,data)
 
         # Solve SM equations for solution state on next timestep
         new_state = losm_timestep(old_state,old_state,problem)
         new_flux = new_state.flux[1:-1]
         new_current = new_state.current[:-1]
 
-        # Getting diffusion solution
-        old_state.F = np.zeros_like(F)
-        diff_state = losm_timestep(old_state,old_state,problem)
-        diff_flux = diff_state.flux[1:-1]
-        diff_current = diff_state.current[:-1]
-
-
         # Assign weight windows according to new flux
-        mcdc["technique"]["ww"][idx_n0, :, 0, 0] = new_flux/np.max(new_flux)
-        data = {
-            "phi tilde": new_flux,
-            "phi n-1": flux,
-            "ww": new_flux/np.max(new_flux)
-        }
-        mcdc["technique"]["ww_phi_tilde"][idx_n0, :, 0, 0] = new_flux
+        mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = new_flux/np.max(new_flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = new_flux
 
-        import matplotlib.pyplot as plt
-        import os 
-        from mpi4py import MPI
-        rank = MPI.COMM_WORLD.Get_rank()
-        if rank == 0:
-            fig, (ax1, ax2,ax3) = plt.subplots(1, 3, figsize=(12, 6))
-            
-            # Plot settings for ax1
-            ax1.grid()
-            ax1.set_xlabel(r"$x$")
-            ax1.set_title(r"$\bar{\phi}$")
-            ax1.set_xlim(0, np.max(x))
-            phi_mc, = ax1.plot(x_mid,flux, "b", label="Monte Carlo")
-            phi_sm, = ax1.plot(x_mid,new_flux, "r", label="Second Moment")
-            phi_diff, = ax1.plot(x_mid,diff_flux, "g", label="Diffusion")
-            ax1.legend()
-
-            ax2.grid()
-            ax2.set_xlabel(r"$x$")
-            ax2.set_title(r"$J$")
-            ax2.set_xlim(0, np.max(x))
-            J_mc, = ax2.plot(x_mid, current_tally, "b", label="Monte Carlo")
-            J_sm, = ax2.plot(x_mid, new_current, "r", label="Second Moment")
-            J_diff, = ax2.plot(x_mid, diff_current, "g", label="Diffusion")
-            ax2.legend()
-
-            ax3.grid()
-            ax3.set_xlabel(r"$x$")
-            ax3.set_title(r"$F$")
-            ax3.set_xlim(0, np.max(x))
-            J_mc, = ax3.plot(x_mid, F[1:-1], "b")
-            if not os.path.isdir('figs'):
-                os.mkdir('figs')
-            plt.savefig("figs/hybrid"+str(idx_n0)+".png")
-
-    write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
+    #write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
 
 # ==============================================================================
 # Hybrid Methods

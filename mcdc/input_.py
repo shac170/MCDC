@@ -1333,7 +1333,7 @@ def time_census(t):
     #        break
 
     # Add the default, final census-at-infinity
-    t = np.append(t, INF)
+    #t = np.append(t, INF)
 
     # Set the time census parameters
     card = global_.input_deck.setting
@@ -1341,7 +1341,7 @@ def time_census(t):
     card["N_census"] = len(t)
 
 
-def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsilon = 1e-2, auto=0):
+def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsilon = 1e-2, auto="user"):
     """
     Activate weight window variance reduction technique.
 
@@ -1367,23 +1367,34 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsil
     """
     card = global_.input_deck.technique
     card["weight_window"] = True
-
     # Set width
     if width is not None:
-        card["ww_width"] = width
+        card["ww"]["width"] = width
 
-    card["ww_auto"] = auto
-    card["ww_epsilon"] = epsilon
+    if auto == "user":
+        card["ww"]["auto"] = 0
+    elif auto == "previous":
+        card["ww"]["auto"] = 1
+    elif auto == "alpha":
+        card["ww"]["auto"] = 2
+    elif auto == "hybrid":
+        card["ww"]["auto"] = 3
+        card["hybrid"] = True
+        card["deterministic"]["mesh"] = card["ww"]["mesh"]
+    else:
+        print_error("Weight window auto setting incorrect input: "+auto+", options are: 'user','previous','alpha','hybrid'")
+    card["ww"]["epsilon"] = epsilon
 
     # Set mesh
     if x is not None:
-        card["ww_mesh"]["x"] = x
+         card["ww"]["mesh"]["x"] = x
     if y is not None:
-        card["ww_mesh"]["y"] = y
+         card["ww"]["mesh"]["y"] = y
     if z is not None:
-        card["ww_mesh"]["z"] = z
+         card["ww"]["mesh"]["z"] = z
     if t is not None:
-        card["ww_mesh"]["t"] = t
+         card["ww"]["mesh"]["t"] = t
+    
 
     if window is None:
         window_size = []
@@ -1415,7 +1426,7 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsil
     window /= np.max(window)
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
-    card["ww"] = window
+    card["ww"]["center"]= window
     if auto == 4:
         card["hybrid"] = True
         card["deterministic"]["mesh"] = card["ww_mesh"]

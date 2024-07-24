@@ -965,18 +965,22 @@ def make_type_technique(input_deck):
     # =========================================================================
     # Weight window
     # =========================================================================
+    ww_list = []
 
-    # Mesh
-    mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww_mesh"])
-    struct += [("ww_mesh", mesh)]
-    struct += [("ww_width", float64)]
-    struct += [("ww_epsilon", float64)]
-    struct += [("ww_auto", float64)]
+    if card["weight_window"]:
+        # Mesh
+        print("WW!!")
+        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww"]["mesh"])
+        ww_list += [("mesh", mesh)]
+    ww_list += [("epsilon", float64)]
+    ww_list += [("auto", float64)]
+    ww_list += [("width", float64)]
+    ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
+    ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
+    ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
+    
+    struct += [("ww", into_dtype(ww_list))]
 
-    # Window
-    struct += [("ww", float64, (Nt, Nx, Ny, Nz))]
-    struct += [("ww_alpha", float64, (Nt, Nx, Ny, Nz))]
-    struct += [("ww_phi_tilde", float64, (Nt, Nx, Ny, Nz))]
     # =========================================================================
     # Weight Roulette
     # =========================================================================
