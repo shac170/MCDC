@@ -607,15 +607,7 @@ def prepare():
         for name in type_.source.names:
             copy_field(mcdc["sources"][i], input_deck.sources[i], name)
 
-    # =========================================================================
-    # Hybrid techniques
-    # =========================================================================
-    # WW mesh
-    if input_deck.technique["hybrid"]:
-        for name in type_.mesh_names[:-1]:
-            copy_field(mcdc["technique"]["deterministic"]["mesh"], input_deck.technique["deterministic"]["mesh"], name)
-
-        kernel.hybrid_preprocess(mcdc)
+    # Tally normalization factor
     normalization_factor = 0
     for source in mcdc["sources"]:
         if source["box"] == 0:

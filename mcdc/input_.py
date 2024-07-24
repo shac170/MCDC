@@ -5,6 +5,7 @@ Docstrings use NumPy formatting.
 
 # Instantiate and get the global variable container
 import mcdc.global_ as global_
+from mcdc.constant import *
 
 import h5py, math, mpi4py, os
 import numpy as np
@@ -1326,14 +1327,14 @@ def time_census(t):
     """
 
     # Remove census beyond the final tally time grid point
-    #while True:
+    # while True:
     #    if t[-1] >= global_.input_deck.tally["mesh"]["t"][-1]:
     #        t = t[:-1]
     #    else:
     #        break
 
     # Add the default, final census-at-infinity
-    #t = np.append(t, INF)
+    # t = np.append(t, INF)
 
     # Set the time census parameters
     card = global_.input_deck.setting
@@ -1341,7 +1342,16 @@ def time_census(t):
     card["N_census"] = len(t)
 
 
-def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsilon = 1e-2, auto="user"):
+def weight_window(
+    x=None,
+    y=None,
+    z=None,
+    t=None,
+    window=None,
+    width=2.5,
+    method={'user'},
+    techniques={},
+):
     """
     Activate weight window variance reduction technique.
 
@@ -1356,10 +1366,14 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsil
     t : array_like[float], optional
         Location of the weight window in t (default None).
     window : array_like[float], optional
-        Bound of the statistic weight of the window (default None).
-    width : array_like[float], optional
-        Statistical width the window will apply (default None).
-
+        Center of the weight windows (default None).
+    width : float, optional
+        Width of the window (default 2.5).
+    epsilon : float, optional
+        Small values used for techniques (default empty list).
+    techniques : list of str, optional
+        List of techniques to use for ww
+        {'user','previous','alpha','min_center','wollaber'} (default {'user'}).
     Returns
     -------
         A weight window card.
@@ -1371,35 +1385,45 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsil
     if width is not None:
         card["ww"]["width"] = width
 
-    if auto == "user":
-        card["ww"]["auto"] = 0
-    elif auto == "previous":
-        card["ww"]["auto"] = 1
-    elif auto == "alpha":
-        card["ww"]["auto"] = 2
-    elif auto == "hybrid":
-        card["ww"]["auto"] = 3
-        card["hybrid"] = True
-        card["deterministic"]["mesh"] = card["ww"]["mesh"]
-    else:
-        print_error("Weight window auto setting incorrect input: "+auto+", options are: 'user','previous','alpha','hybrid'")
-    card["ww"]["epsilon"] = epsilon
+    method_checked = check_support(
+        "Weight window method",
+        method,
+        ["user","previous","alpha"],
+    )
+    if method_checked == "user":
+        card["ww"]["auto"] = WW_USER
+    elif method_checked == "previous":
+        card["ww"]["auto"] = WW_PREVIOUS
+    elif method_checked == "alpha":
+        card["ww"]["auto"] = WW_ALPHA
+
+    # Checking techniques
+    for tech in techniques:
+        tech_checked = check_support(
+            "Weight window technique",
+            tech[0],
+            ["min-center", "wollaber"],
+        )
+        if tech_checked == "min-center":
+            card["ww"]["epsilon"][WW_MIN] = tech[1]
+        elif tech_checked == "wollaber":
+            card["ww"]["epsilon"][WW_WOLLABER] = tech[1]
+            card["ww"]["epsilon"][WW_WOLLABER+1] = tech[2]
 
     # Set mesh
     if x is not None:
-         card["ww"]["mesh"]["x"] = x
+        card["ww"]["mesh"]["x"] = x
     if y is not None:
-         card["ww"]["mesh"]["y"] = y
+        card["ww"]["mesh"]["y"] = y
     if z is not None:
-         card["ww"]["mesh"]["z"] = z
+        card["ww"]["mesh"]["z"] = z
     if t is not None:
-         card["ww"]["mesh"]["t"] = t
-    
+        card["ww"]["mesh"]["t"] = t
 
     if window is None:
         window_size = []
         if t is not None:
-            Nt = len(t) - 1 
+            Nt = len(t) - 1
             window_size.append(Nt)
         if x is not None:
             Nx = len(x) - 1
@@ -1412,7 +1436,7 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsil
             window_size.append(Nz)
         window_size = np.array(window_size)
         window = np.ones((window_size))
-        
+
     # Set window
     ax_expand = []
     if t is None:
@@ -1426,11 +1450,7 @@ def weight_window(x=None, y=None, z=None, t=None, window=None, width=None, epsil
     window /= np.max(window)
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
-    card["ww"]["center"]= window
-    if auto == 4:
-        card["hybrid"] = True
-        card["deterministic"]["mesh"] = card["ww_mesh"]
-
+    card["ww"]["center"] = window
     return card
 
 

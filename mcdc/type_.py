@@ -929,7 +929,6 @@ def make_type_technique(input_deck):
         ("implicit_capture", bool_),
         ("population_control", bool_),
         ("weight_window", bool_),
-        ("hybrid", bool_),
         ("weight_roulette", bool_),
         ("iQMC", bool_),
         ("IC_generator", bool_),
@@ -937,6 +936,12 @@ def make_type_technique(input_deck):
         ("domain_decomposition", bool_),
         ("uq", bool_),
     ]
+    
+    # =========================================================================
+    # Tally normalization factor
+    # =========================================================================
+
+    struct += ("integrated_source",float64), 
 
     # =========================================================================
     # Population control
@@ -969,12 +974,11 @@ def make_type_technique(input_deck):
 
     if card["weight_window"]:
         # Mesh
-        print("WW!!")
         mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww"]["mesh"])
         ww_list += [("mesh", mesh)]
-    ww_list += [("epsilon", float64)]
-    ww_list += [("auto", float64)]
+    ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
+    ww_list += [("epsilon", float64, (3,))]
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
@@ -987,25 +991,6 @@ def make_type_technique(input_deck):
 
     # Constants
     struct += [("wr_threshold", float64), ("wr_survive", float64)]
-
-
-    # =========================================================================
-    # Hybrid techniques
-    # =========================================================================
-    hybrid_list = []
-    # Mesh for deterministic material idx
-    if card["hybrid"]:
-        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi = make_type_mesh_(card["deterministic"]["mesh"])
-        Ng = G
-        N_dim = 6  # group, x, y, z, mu, phi
-    else:
-        Nx = Ny = Nz = Nt = Nmu = N_azi = N_particle = Ng = N_dim = 0
-
-    hybrid_list += [("material_idx", int64, (Nt, Nx, Ny, Nz))]
-    hybrid_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
-    hybrid_list += [("mesh", mesh)]
-    struct += [("deterministic", into_dtype(hybrid_list))]
-    struct += [("integrated_source", float64)]
 
     # =========================================================================
     # Quasi Monte Carlo
