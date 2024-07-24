@@ -732,6 +732,7 @@ def make_type_mesh_tally(input_deck):
     # Make tally structure
     mesh_tally = into_dtype(struct)
 
+
 def make_type_edge_tally(input_deck):
     global edge_tally
     struct = []
@@ -789,6 +790,7 @@ def make_type_edge_tally(input_deck):
 
     # Make tally structure
     edge_tally = into_dtype(struct)
+
 
 def make_type_surface_tally(input_deck):
     global surface_tally
@@ -936,12 +938,12 @@ def make_type_technique(input_deck):
         ("domain_decomposition", bool_),
         ("uq", bool_),
     ]
-    
+
     # =========================================================================
     # Tally normalization factor
     # =========================================================================
 
-    struct += ("integrated_source",float64), 
+    struct += (("integrated_source", float64),)
 
     # =========================================================================
     # Population control
@@ -982,7 +984,7 @@ def make_type_technique(input_deck):
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
-    
+
     struct += [("ww", into_dtype(ww_list))]
 
     # =========================================================================

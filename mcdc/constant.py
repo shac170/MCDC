@@ -127,4 +127,3 @@ WW_ALPHA = 2
 # modifications
 WW_MIN = 0
 WW_WOLLABER = 1
-

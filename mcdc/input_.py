@@ -1349,7 +1349,7 @@ def weight_window(
     t=None,
     window=None,
     width=2.5,
-    method={'user'},
+    method={"user"},
     techniques={},
 ):
     """
@@ -1388,7 +1388,7 @@ def weight_window(
     method_checked = check_support(
         "Weight window method",
         method,
-        ["user","previous","alpha"],
+        ["user", "previous", "alpha"],
     )
     if method_checked == "user":
         card["ww"]["auto"] = WW_USER
@@ -1408,7 +1408,7 @@ def weight_window(
             card["ww"]["epsilon"][WW_MIN] = tech[1]
         elif tech_checked == "wollaber":
             card["ww"]["epsilon"][WW_WOLLABER] = tech[1]
-            card["ww"]["epsilon"][WW_WOLLABER+1] = tech[2]
+            card["ww"]["epsilon"][WW_WOLLABER + 1] = tech[2]
 
     # Set mesh
     if x is not None:

@@ -2109,7 +2109,7 @@ def mesh_crossing_evaluate(P, mesh):
     t2, x2, y2, z2, outside2 = mesh_get_index(P, mesh)
     # Return particle to initial position
     shift_particle(P, -2 * SHIFT)
-    
+
     # Determine dimension crossed
     directions = []
 
@@ -2141,7 +2141,6 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
     mu, azi = mesh_get_angular_index(P, mesh)
     g, outside_energy = mesh_get_energy_index(P, mesh, mcdc["setting"]["mode_MG"])
 
-    
     # Outside grid?
     if outside or outside_energy:
         return
@@ -2174,6 +2173,7 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
         elif score_type == SCORE_SECOND_MOMENT:
             score = flux * mu * mu
         tally_bin[TALLY_SCORE, idx + i] += score
+
 
 @njit
 def score_surface_tally(P, surface, tally, data, mcdc):
@@ -3402,7 +3402,7 @@ def branchless_collision(P, prog):
 def weight_window(P, prog):
     mcdc = adapt.device(prog)
     # Kill particle below "infinitely" small cutoff
-    if P["w"] < 1/INF:
+    if P["w"] < 1 / INF:
         P["alive"] = False
     else:
         # Get indices
@@ -3416,25 +3416,25 @@ def weight_window(P, prog):
         if epsilon[WW_MIN] > 0:
             # Adjust centers by epsilon
             eps = epsilon[WW_MIN]
-            center = center*(1-eps)+eps
+            center = center * (1 - eps) + eps
 
         if epsilon[WW_WOLLABER] > 0:
             # Adjust centers by epsilon
             eps = epsilon[WW_WOLLABER]
-            w_min = epsilon[WW_WOLLABER+1]
-            center = (center)*(1+(1/eps-1)*np.exp(-(center-w_min)/eps))
+            w_min = epsilon[WW_WOLLABER + 1]
+            center = (center) * (1 + (1 / eps - 1) * np.exp(-(center - w_min) / eps))
 
         # upper limit
-        ulimit = center*width
+        ulimit = center * width
 
-        # lower limit 
-        llimit = center/width
+        # lower limit
+        llimit = center / width
 
         # If above target
         if P["w"] > ulimit:
 
             # Splitting
-            n_split = math.ceil(P["w"]/ulimit)
+            n_split = math.ceil(P["w"] / ulimit)
 
             # Set target weight
             P["w"] /= n_split
@@ -3444,30 +3444,35 @@ def weight_window(P, prog):
             P["alive"] = False
 
         # Below target
-        elif P['w'] < llimit:
+        elif P["w"] < llimit:
 
             # Russian roulette
             # Survival weight
-            w_survival = 1.1*llimit
+            w_survival = 1.1 * llimit
 
             xi = rng(P)
-            
-            if xi > P["w"]/w_survival:
+
+            if xi > P["w"] / w_survival:
                 P["alive"] = False
             else:
                 P["w"] = w_survival
 
 
 def write_output(file, idx_census, t, x_mid, data, method, epsilon, width):
-    with open(file, 'a' if idx_census > 2 else 'w') as f:
+    with open(file, "a" if idx_census > 2 else "w") as f:
         if idx_census == 2:
-            f.write(f"Weight Window Output\n Method: {method}\nWindow width,{width}\nEpsilon,{epsilon}\n")
-        f.write(f"\ntimestep,{idx_census}\nSim Time,{t[idx_census]},dt:,{t[idx_census] - t[idx_census - 1]}\n")
+            f.write(
+                f"Weight Window Output\n Method: {method}\nWindow width,{width}\nEpsilon,{epsilon}\n"
+            )
+        f.write(
+            f"\ntimestep,{idx_census}\nSim Time,{t[idx_census]},dt:,{t[idx_census] - t[idx_census - 1]}\n"
+        )
         f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
         for key, values in data.items():
             f.write(f"{key}: ," + ", ".join(f"{val:.6e}" for val in values) + "\n")
 
-def get_flux(idx,mcdc,data):
+
+def get_flux(idx, mcdc, data):
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         if mcdc["technique"]["iQMC"]:
             break
@@ -3478,11 +3483,7 @@ def get_flux(idx,mcdc,data):
         N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
         Ns = 1 + N_sensitivity
         if mcdc["technique"]["dsm_order"] == 2:
-            Ns = (
-                1
-                + 2 * N_sensitivity
-                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-            )
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
         Nmu = len(mesh["mu"]) - 1
         N_azi = len(mesh["azi"]) - 1
         Ng = len(mesh["g"]) - 1
@@ -3515,24 +3516,31 @@ def get_flux(idx,mcdc,data):
                 sdev = score_tally_bin[TALLY_SUM_SQ]
                 return mean[idx][:]
 
-def ww_auto(data,mcdc, dump=True):
-    idx_n0 = mcdc["idx_census"] 
-    idx_n1 = idx_n0 - 1
-    idx_n2 = idx_n1 - 1 
 
-    dt = abs(mcdc["technique"]["ww"]["mesh"]['t'][idx_n0] - mcdc["technique"]["ww"]["mesh"]['t'][idx_n1])
-    dx = abs(mcdc["technique"]["ww"]["mesh"]['x'][1:] - mcdc["technique"]["ww"]["mesh"]['x'][:-1])
+def ww_auto(data, mcdc, dump=True):
+    idx_n0 = mcdc["idx_census"]
+    idx_n1 = idx_n0 - 1
+    idx_n2 = idx_n1 - 1
+
+    dt = abs(
+        mcdc["technique"]["ww"]["mesh"]["t"][idx_n0]
+        - mcdc["technique"]["ww"]["mesh"]["t"][idx_n1]
+    )
+    dx = abs(
+        mcdc["technique"]["ww"]["mesh"]["x"][1:]
+        - mcdc["technique"]["ww"]["mesh"]["x"][:-1]
+    )
     N_particle = mcdc["setting"]["N_particle"]
 
-    flux = get_flux(idx_n1,mcdc,data)
-    flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
+    flux = get_flux(idx_n1, mcdc, data)
+    flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
 
     method = mcdc["technique"]["ww"]["auto"]
 
     # User supplied weight windows
     if method == WW_USER:
         return
-    
+
     # Previous timestep weight windows
     elif method == WW_PREVIOUS:
         mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = flux / np.max(flux)
@@ -3540,8 +3548,8 @@ def ww_auto(data,mcdc, dump=True):
 
     # Alpha approximation weight windows
     elif method == WW_ALPHA:
-        old_flux =  get_flux(idx_n2,mcdc,data)
-        old_flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
+        old_flux = get_flux(idx_n2, mcdc, data)
+        old_flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
 
         alpha = np.ones_like(flux)
         mask = old_flux != 0
@@ -3552,7 +3560,7 @@ def ww_auto(data,mcdc, dump=True):
         mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = new_flux / np.max(new_flux)
         mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = new_flux
         mcdc["technique"]["ww"]["alpha"][idx_n0, :, 0, 0] = alpha
-                   
+
 
 # ==============================================================================
 # Quasi Monte Carlo
