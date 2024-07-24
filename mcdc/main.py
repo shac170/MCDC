@@ -1278,16 +1278,7 @@ def generate_hdf5(data, mcdc):
                 dict_to_h5group(
                     input_deck.technique, input_group.create_group("technique")
                 )
-            # Store deterministic problem
-            det = mcdc["technique"]["deterministic"]
-            f.create_dataset(
-                "input_deck/deterministic/source",
-                data=np.squeeze(det["source"]),
-            )
-            f.create_dataset(
-                "input_deck/deterministic/material_idx",
-                data=np.squeeze(det["material_idx"]),
-            )
+    
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:
@@ -1351,74 +1342,6 @@ def generate_hdf5(data, mcdc):
                     mean = score_tally_bin[TALLY_SUM]
                     sdev = score_tally_bin[TALLY_SUM_SQ]
 
-                    f.create_dataset(group_name + "mean", data=mean)
-                    f.create_dataset(group_name + "sdev", data=sdev)
-                    if mcdc["technique"]["uq"]:
-                        mc_var = score_tally_bin[TALLY_UQ_BATCH_VAR]
-                        tot_var = score_tally_bin[TALLY_UQ_BATCH]
-                        uq_var = tot_var - mc_var
-                        f.create_dataset(group_name + "uq_var", data=uq_var)
-
-            # Edge tallies
-            for ID, tally in enumerate(mcdc["edge_tallies"]):
-                if mcdc["technique"]["iQMC"]:
-                    break
-
-                mesh = tally["filter"]
-                f.create_dataset("tallies/edge_tally_%i/grid/t" % ID, data=mesh["t"])
-                f.create_dataset("tallies/edge_tally_%i/grid/x" % ID, data=mesh["x"])
-                f.create_dataset("tallies/edge_tally_%i/grid/y" % ID, data=mesh["y"])
-                f.create_dataset("tallies/edge_tally_%i/grid/z" % ID, data=mesh["z"])
-                f.create_dataset("tallies/edge_tally_%i/grid/mu" % ID, data=mesh["mu"])
-                f.create_dataset(
-                    "tallies/edge_tally_%i/grid/azi" % ID, data=mesh["azi"]
-                )
-                f.create_dataset("tallies/edge_tally_%i/grid/g" % ID, data=mesh["g"])
-
-                # Shape
-                N_sensitivity = input_deck.setting["N_sensitivity"]
-                Ns = 1 + N_sensitivity
-                if input_deck.technique["dsm_order"] == 2:
-                    Ns = (
-                        1
-                        + 2 * N_sensitivity
-                        + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-                    )
-                Nmu = len(mesh["mu"]) - 1
-                N_azi = len(mesh["azi"]) - 1
-                Ng = len(mesh["g"]) - 1
-                Nx = len(mesh["x"])
-                Ny = len(mesh["y"])
-                Nz = len(mesh["z"])
-                Nt = len(mesh["t"]) - 1
-                N_score = tally["N_score"]
-
-                if not mcdc["technique"]["uq"]:
-                    shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
-                else:
-                    shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
-
-                # Reshape tally
-                N_bin = tally["N_bin"]
-                start = tally["stride"]["tally"]
-                tally_bin = data[TALLY][:, start : start + N_bin]
-                tally_bin = tally_bin.reshape(shape)
-
-                # Roll tally so that score is in the front
-                tally_bin = np.rollaxis(tally_bin, 9, 0)
-
-                # Iterate over scores
-                for i in range(N_score):
-                    score_type = tally["scores"][i]
-                    score_tally_bin = np.squeeze(tally_bin[i])
-                    if score_type == SCORE_FLUX:
-                        score_name = "flux"
-                    elif score_type == SCORE_NET_CURRENT:
-                        score_name = "net-current"
-                    group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
-
-                    mean = score_tally_bin[TALLY_SUM]
-                    sdev = score_tally_bin[TALLY_SUM_SQ]
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
