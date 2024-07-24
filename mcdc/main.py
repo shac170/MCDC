@@ -1278,7 +1278,7 @@ def generate_hdf5(data, mcdc):
                 dict_to_h5group(
                     input_deck.technique, input_group.create_group("technique")
                 )
-    
+
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:
