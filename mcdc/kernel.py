@@ -3457,21 +3457,6 @@ def weight_window(P, prog):
             else:
                 P["w"] = w_survival
 
-
-def write_output(file, idx_census, t, x_mid, data, method, epsilon, width):
-    with open(file, "a" if idx_census > 2 else "w") as f:
-        if idx_census == 2:
-            f.write(
-                f"Weight Window Output\n Method: {method}\nWindow width,{width}\nEpsilon,{epsilon}\n"
-            )
-        f.write(
-            f"\ntimestep,{idx_census}\nSim Time,{t[idx_census]},dt:,{t[idx_census] - t[idx_census - 1]}\n"
-        )
-        f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
-        for key, values in data.items():
-            f.write(f"{key}: ," + ", ".join(f"{val:.6e}" for val in values) + "\n")
-
-
 def get_flux(idx, mcdc, data):
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         if mcdc["technique"]["iQMC"]:
@@ -3501,11 +3486,11 @@ def get_flux(idx, mcdc, data):
         # Reshape tally
         N_bin = tally["N_bin"]
         start = tally["stride"]["tally"]
-        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = np.ascontiguousarray(data[TALLY][:, start : start + N_bin])
         tally_bin = tally_bin.reshape(shape)
 
         # Roll tally so that score is in the front
-        tally_bin = np.rollaxis(tally_bin, 9, 0)
+        tally_bin = tally_bin.transpose((9, 0, 1, 2, 3, 4, 5, 6, 7, 8))
 
         # Iterate over scores
         for i in range(N_score):
@@ -3522,18 +3507,18 @@ def ww_auto(data, mcdc, dump=True):
     idx_n1 = idx_n0 - 1
     idx_n2 = idx_n1 - 1
 
-    dt = abs(
+    dt = np.abs(
         mcdc["technique"]["ww"]["mesh"]["t"][idx_n0]
         - mcdc["technique"]["ww"]["mesh"]["t"][idx_n1]
     )
-    dx = abs(
+    dx = np.abs(
         mcdc["technique"]["ww"]["mesh"]["x"][1:]
         - mcdc["technique"]["ww"]["mesh"]["x"][:-1]
     )
     N_particle = mcdc["setting"]["N_particle"]
-
+    norm_factor = mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
     flux = get_flux(idx_n1, mcdc, data)
-    flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
+    flux = flux * norm_factor
 
     method = mcdc["technique"]["ww"]["auto"]
 
@@ -3549,7 +3534,7 @@ def ww_auto(data, mcdc, dump=True):
     # Alpha approximation weight windows
     elif method == WW_ALPHA:
         old_flux = get_flux(idx_n2, mcdc, data)
-        old_flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
+        old_flux = old_flux * norm_factor
 
         alpha = np.ones_like(flux)
         mask = old_flux != 0
