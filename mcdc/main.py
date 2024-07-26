@@ -607,7 +607,6 @@ def prepare():
         for name in type_.source.names:
             copy_field(mcdc["sources"][i], input_deck.sources[i], name)
 
-
     # Tally normalization factor
     normalization_factor = 0
     for source in mcdc["sources"]:
@@ -1326,14 +1325,22 @@ def generate_hdf5(data, mcdc):
                     for ix in range(Nx):
                         for iy in range(Ny):
                             for iz in range(Nz):
-                                if Nt>1:
-                                    cell_vol[it,ix,iy,iz] *= mesh["t"][it+1] - mesh["t"][it]
-                                if Nx>1:
-                                    cell_vol[it,ix,iy,iz] *= mesh["x"][ix+1] - mesh["x"][ix]
-                                if Ny>1:
-                                    cell_vol[it,ix,iy,iz] *= mesh["y"][iy+1] - mesh["y"][iy]
-                                if Nz>1:
-                                    cell_vol[it,ix,iy,iz] *= mesh["z"][iz+1] - mesh["z"][iz]
+                                if Nt > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["t"][it + 1] - mesh["t"][it]
+                                    )
+                                if Nx > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["x"][ix + 1] - mesh["x"][ix]
+                                    )
+                                if Ny > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["y"][iy + 1] - mesh["y"][iy]
+                                    )
+                                if Nz > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["z"][iz + 1] - mesh["z"][iz]
+                                    )
                 cell_vol = np.squeeze(cell_vol)
 
                 # Reshape tally
@@ -1357,8 +1364,8 @@ def generate_hdf5(data, mcdc):
                         score_name = "fission"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
-                    mean = score_tally_bin[TALLY_SUM] * integrated_source /cell_vol
-                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source /cell_vol
+                    mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
+                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
@@ -1408,12 +1415,14 @@ def generate_hdf5(data, mcdc):
 
                 cell_vol = np.ones((Nt, Nx, Ny, Nz))
                 for it in range(Nt):
-                    for ix in range(Nx-1):
-                        for iy in range(Ny-1):
-                            for iz in range(Nz-1):
-                                if Nt>1:
-                                    cell_vol[it,ix,iy,iz] *= mesh["t"][it+1] - mesh["t"][it]
-                              
+                    for ix in range(Nx - 1):
+                        for iy in range(Ny - 1):
+                            for iz in range(Nz - 1):
+                                if Nt > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["t"][it + 1] - mesh["t"][it]
+                                    )
+
                 cell_vol = np.squeeze(cell_vol)
                 print(cell_vol)
                 input()
@@ -1436,8 +1445,8 @@ def generate_hdf5(data, mcdc):
                         score_name = "net-current"
                     group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
 
-                    mean = score_tally_bin[TALLY_SUM] 
-                    sdev = score_tally_bin[TALLY_SUM_SQ] 
+                    mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
+                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
 
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
