@@ -974,10 +974,9 @@ def make_type_technique(input_deck):
     # =========================================================================
     ww_list = []
 
-    if card["weight_window"]:
-        # Mesh
-        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww"]["mesh"])
-        ww_list += [("mesh", mesh)]
+    # Mesh
+    mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww"]["mesh"])
+    ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
     ww_list += [("epsilon", float64, (3,))]
