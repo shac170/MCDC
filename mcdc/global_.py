@@ -87,8 +87,6 @@ class InputDeck:
                 "auto": 0,
                 "epsilon": np.zeros(3),
             },
-            "hybrid": False,
-            "deterministic": {},
             "domain_decomposition": False,
             "dd_idx": 0,
             "dd_mesh": make_card_mesh(),

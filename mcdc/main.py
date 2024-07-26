@@ -1291,29 +1291,6 @@ def generate_hdf5(data, mcdc):
                 dict_to_h5group(
                     input_deck.technique, input_group.create_group("technique")
                 )
-            # Store deterministic problem
-            if mcdc["technique"]["hybrid"]:
-                det = mcdc["technique"]["deterministic"]
-                f.create_dataset(
-                    "input_deck/deterministic/source",
-                    data=np.squeeze(det["source"]),
-                )
-                f.create_dataset(
-                    "input_deck/deterministic/material_idx",
-                    data=np.squeeze(det["material_idx"]),
-                )
-                f.create_dataset(
-                    "input_deck/deterministic/flux",
-                    data=np.squeeze(det["flux"]),
-                )
-                f.create_dataset(
-                    "input_deck/deterministic/current",
-                    data=np.squeeze(det["current"]),
-                )
-                f.create_dataset(
-                    "tallies/normalization_factor",
-                    data=mcdc["technique"]["integrated_source"],
-                )
 
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):

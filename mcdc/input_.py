@@ -1451,11 +1451,7 @@ def weight_window(
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
     card["ww"]["center"] = window
-    if auto == 4:
-        card["hybrid"] = True
-        card["deterministic"]["mesh"] = card["ww_mesh"]
 
-    card["ww"]["center"] = window
     return card
 
 
