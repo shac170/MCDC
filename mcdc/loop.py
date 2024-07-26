@@ -89,7 +89,7 @@ def loop_fixed_source(data, mcdc):
 
         # Loop over time censuses
         for idx_census in range(mcdc["setting"]["N_census"]):
-            with objmode(start='float64'):
+            with objmode(start="float64"):
                 start = MPI.Wtime()
             mcdc["idx_census"] = idx_census
             # Apply weight window
@@ -545,7 +545,6 @@ def step_particle(P, data, prog):
     # Apply weight window
     if P["alive"] and mcdc["technique"]["weight_window"]:
         kernel.weight_window(P, prog)
-        
 
     # Apply weight roulette
     if P["alive"] and mcdc["technique"]["weight_roulette"]:

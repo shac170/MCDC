@@ -2110,7 +2110,6 @@ def mesh_crossing_evaluate(P, mesh):
     # Return particle to initial position
     shift_particle(P, -2 * SHIFT)
 
-
     # Determine dimension crossed
     directions = []
 
@@ -3489,7 +3488,6 @@ def weight_window(P, prog):
     mcdc = adapt.device(prog)
     # Kill particle below "infinitely" small cutoff
     if P["w"] < 1 / INF:
-    if P["w"] < 1 / INF:
         P["alive"] = False
     else:
         # Get indices
@@ -3524,7 +3522,6 @@ def weight_window(P, prog):
 
             # Splitting
             n_split = math.ceil(P["w"] / ulimit)
-            n_split = math.ceil(P["w"] / ulimit)
 
             # Set target weight
             P["w"] /= n_split
@@ -3535,16 +3532,11 @@ def weight_window(P, prog):
 
         # Below target
         elif P["w"] < llimit:
-        elif P["w"] < llimit:
 
             # Russian roulette
-            # Survival weight
-            w_survival = 1.1 * llimit
             w_survival = 1.1 * llimit
 
             xi = rng(P)
-
-            if xi > P["w"] / w_survival:
 
             if xi > P["w"] / w_survival:
                 P["alive"] = False
@@ -3841,7 +3833,6 @@ def ww_auto(data, mcdc, dump=True):
     if method == WW_USER:
         return
 
-
     # Previous timestep weight windows
     elif method == WW_PREVIOUS:
         mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = flux / np.max(flux)
@@ -3867,7 +3858,7 @@ def ww_auto(data, mcdc, dump=True):
         mcdc["technique"]["ww"]["alpha"][idx_n0, :, 0, 0] = alpha
 
     # Hybrid weight windows
-    elif method == 3:
+    elif method == WW_HYBRID:
 
         # Creating initial condition state class
         old_state, problem = get_state(idx_n1, mcdc, data)

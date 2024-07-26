@@ -732,6 +732,7 @@ def make_type_mesh_tally(input_deck):
     # Make tally structure
     mesh_tally = into_dtype(struct)
 
+
 def make_type_edge_tally(input_deck):
     global edge_tally
     struct = []
@@ -789,6 +790,7 @@ def make_type_edge_tally(input_deck):
 
     # Make tally structure
     edge_tally = into_dtype(struct)
+
 
 def make_type_surface_tally(input_deck):
     global surface_tally
@@ -1012,7 +1014,6 @@ def make_type_technique(input_deck):
     hybrid_list += [("flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
     hybrid_list += [("current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
     struct += [("deterministic", into_dtype(hybrid_list))]
-    struct += [("integrated_source", float64)]
 
     # =========================================================================
     # Quasi Monte Carlo
