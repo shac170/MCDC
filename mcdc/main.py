@@ -1279,13 +1279,16 @@ def generate_hdf5(data, mcdc):
                 dict_to_h5group(
                     input_deck.technique, input_group.create_group("technique")
                 )
-
+            # Tally normalization factor
+            integrated_source = mcdc["technique"]["integrated_source"]
+            f.create_dataset("tallies/integrated_source", data=integrated_source)
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:
                     break
 
                 mesh = tally["filter"]
+
                 f.create_dataset("tallies/mesh_tally_%i/grid/t" % ID, data=mesh["t"])
                 f.create_dataset("tallies/mesh_tally_%i/grid/x" % ID, data=mesh["x"])
                 f.create_dataset("tallies/mesh_tally_%i/grid/y" % ID, data=mesh["y"])
@@ -1318,6 +1321,20 @@ def generate_hdf5(data, mcdc):
                     shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
                 else:
                     shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+                cell_vol = np.ones((Nt, Nx, Ny, Nz))
+                for it in range(Nt):
+                    for ix in range(Nx):
+                        for iy in range(Ny):
+                            for iz in range(Nz):
+                                if Nt>1:
+                                    cell_vol[it,ix,iy,iz] *= mesh["t"][it+1] - mesh["t"][it]
+                                if Nx>1:
+                                    cell_vol[it,ix,iy,iz] *= mesh["x"][ix+1] - mesh["x"][ix]
+                                if Ny>1:
+                                    cell_vol[it,ix,iy,iz] *= mesh["y"][iy+1] - mesh["y"][iy]
+                                if Nz>1:
+                                    cell_vol[it,ix,iy,iz] *= mesh["z"][iz+1] - mesh["z"][iz]
+                cell_vol = np.squeeze(cell_vol)
 
                 # Reshape tally
                 N_bin = tally["N_bin"]
@@ -1340,9 +1357,8 @@ def generate_hdf5(data, mcdc):
                         score_name = "fission"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
-                    mean = score_tally_bin[TALLY_SUM]
-                    sdev = score_tally_bin[TALLY_SUM_SQ]
-
+                    mean = score_tally_bin[TALLY_SUM] * integrated_source /cell_vol
+                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source /cell_vol
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
@@ -1390,6 +1406,17 @@ def generate_hdf5(data, mcdc):
                 else:
                     shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
 
+                cell_vol = np.ones((Nt, Nx, Ny, Nz))
+                for it in range(Nt):
+                    for ix in range(Nx-1):
+                        for iy in range(Ny-1):
+                            for iz in range(Nz-1):
+                                if Nt>1:
+                                    cell_vol[it,ix,iy,iz] *= mesh["t"][it+1] - mesh["t"][it]
+                              
+                cell_vol = np.squeeze(cell_vol)
+                print(cell_vol)
+                input()
                 # Reshape tally
                 N_bin = tally["N_bin"]
                 start = tally["stride"]["tally"]
@@ -1409,8 +1436,9 @@ def generate_hdf5(data, mcdc):
                         score_name = "net-current"
                     group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
 
-                    mean = score_tally_bin[TALLY_SUM]
-                    sdev = score_tally_bin[TALLY_SUM_SQ]
+                    mean = score_tally_bin[TALLY_SUM] 
+                    sdev = score_tally_bin[TALLY_SUM_SQ] 
+
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
