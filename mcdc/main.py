@@ -620,6 +620,7 @@ def prepare():
             )
 
         kernel.hybrid_preprocess(mcdc)
+    # Tally normalization factor
     normalization_factor = 0
     for source in mcdc["sources"]:
         if source["box"] == 0:
@@ -950,8 +951,9 @@ def prepare():
     # =========================================================================
     # Weight window (WW)
     # =========================================================================
+
+    # WW mesh
     if input_deck.technique["weight_window"]:
-        # WW mesh
         for name in type_.mesh_names[:-1]:
             copy_field(
                 mcdc["technique"]["ww"]["mesh"],
@@ -1312,6 +1314,7 @@ def generate_hdf5(data, mcdc):
                     "tallies/normalization_factor",
                     data=mcdc["technique"]["integrated_source"],
                 )
+
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:

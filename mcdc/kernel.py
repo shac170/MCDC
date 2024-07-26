@@ -2110,6 +2110,7 @@ def mesh_crossing_evaluate(P, mesh):
     # Return particle to initial position
     shift_particle(P, -2 * SHIFT)
 
+
     # Determine dimension crossed
     directions = []
 
@@ -2574,8 +2575,6 @@ def move_to_event(P, data, mcdc):
     d_mesh = INF
     if mcdc["cycle_active"]:
         for tally in mcdc["mesh_tallies"]:
-            d_mesh = min(d_mesh, distance_to_mesh(P, tally["filter"], mcdc))
-        for tally in mcdc["edge_tallies"]:
             d_mesh = min(d_mesh, distance_to_mesh(P, tally["filter"], mcdc))
 
     d_domain = INF
@@ -3490,6 +3489,7 @@ def weight_window(P, prog):
     mcdc = adapt.device(prog)
     # Kill particle below "infinitely" small cutoff
     if P["w"] < 1 / INF:
+    if P["w"] < 1 / INF:
         P["alive"] = False
     else:
         # Get indices
@@ -3524,6 +3524,7 @@ def weight_window(P, prog):
 
             # Splitting
             n_split = math.ceil(P["w"] / ulimit)
+            n_split = math.ceil(P["w"] / ulimit)
 
             # Set target weight
             P["w"] /= n_split
@@ -3534,12 +3535,16 @@ def weight_window(P, prog):
 
         # Below target
         elif P["w"] < llimit:
+        elif P["w"] < llimit:
 
             # Russian roulette
             # Survival weight
             w_survival = 1.1 * llimit
+            w_survival = 1.1 * llimit
 
             xi = rng(P)
+
+            if xi > P["w"] / w_survival:
 
             if xi > P["w"] / w_survival:
                 P["alive"] = False
@@ -3573,6 +3578,7 @@ def get_flux(idx, mcdc, data):
         Ns = 1 + N_sensitivity
         if mcdc["technique"]["dsm_order"] == 2:
             Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
         Nmu = len(mesh["mu"]) - 1
         N_azi = len(mesh["azi"]) - 1
         Ng = len(mesh["g"]) - 1
@@ -3590,11 +3596,11 @@ def get_flux(idx, mcdc, data):
         # Reshape tally
         N_bin = tally["N_bin"]
         start = tally["stride"]["tally"]
-        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = np.ascontiguousarray(data[TALLY][:, start : start + N_bin])
         tally_bin = tally_bin.reshape(shape)
 
         # Roll tally so that score is in the front
-        tally_bin = np.rollaxis(tally_bin, 9, 0)
+        tally_bin = tally_bin.transpose((9, 0, 1, 2, 3, 4, 5, 6, 7, 8))
 
         # Iterate over scores
         for i in range(N_score):
@@ -3810,6 +3816,7 @@ def ww_auto(data, mcdc, dump=True):
     idx_n0 = mcdc["idx_census"]
     idx_n1 = idx_n0 - 1
     idx_n2 = idx_n1 - 1
+    idx_n2 = idx_n1 - 1
 
     dt = abs(
         mcdc["technique"]["ww"]["mesh"]["t"][idx_n0]
@@ -3831,15 +3838,19 @@ def ww_auto(data, mcdc, dump=True):
     method = mcdc["technique"]["ww"]["auto"]
 
     # User supplied weight windows
-    if method == 0:
+    if method == WW_USER:
         return
 
+
     # Previous timestep weight windows
-    elif method == 1:
+    elif method == WW_PREVIOUS:
         mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = flux / np.max(flux)
         mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = flux
 
     # Alpha approximation weight windows
+    elif method == WW_ALPHA:
+        old_flux = get_flux(idx_n2, mcdc, data)
+        old_flux = old_flux * norm_factor
     elif method == 2:
         old_flux = get_flux(idx_n2, mcdc, data)
         # Normalizing tallies

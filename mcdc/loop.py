@@ -89,11 +89,13 @@ def loop_fixed_source(data, mcdc):
 
         # Loop over time censuses
         for idx_census in range(mcdc["setting"]["N_census"]):
-            start = MPI.Wtime()
+            with objmode(start='float64'):
+                start = MPI.Wtime()
             mcdc["idx_census"] = idx_census
             # Apply weight window
             if mcdc["technique"]["weight_window"] and idx_census > 0:
-                kernel.ww_auto(data, mcdc)
+                with objmode():
+                    kernel.ww_auto(data, mcdc)
             seed_census = kernel.split_seed(seed_batch, SEED_SPLIT_CENSUS)
 
             # Loop over source particles
@@ -114,7 +116,8 @@ def loop_fixed_source(data, mcdc):
                 # Manage particle banks: population control and work rebalance
                 seed_bank = kernel.split_seed(seed_census, SEED_SPLIT_BANK)
                 kernel.manage_particle_banks(seed_bank, mcdc)
-            mcdc["runtime_census"][idx_census] = MPI.Wtime() - start
+            with objmode():
+                mcdc["runtime_census"][idx_census] = MPI.Wtime() - start
 
         # Multi-batch closeout
         if mcdc["setting"]["N_batch"] > 1:
@@ -542,6 +545,7 @@ def step_particle(P, data, prog):
     # Apply weight window
     if P["alive"] and mcdc["technique"]["weight_window"]:
         kernel.weight_window(P, prog)
+        
 
     # Apply weight roulette
     if P["alive"] and mcdc["technique"]["weight_roulette"]:

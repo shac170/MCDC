@@ -5,6 +5,7 @@ Docstrings use NumPy formatting.
 
 # Instantiate and get the global variable container
 import mcdc.global_ as global_
+from mcdc.constant import *
 
 import h5py, math, mpi4py, os
 import numpy as np
@@ -1342,7 +1343,14 @@ def time_census(t):
 
 
 def weight_window(
-    x=None, y=None, z=None, t=None, window=None, width=None, epsilon=1e-2, auto="user"
+    x=None,
+    y=None,
+    z=None,
+    t=None,
+    window=None,
+    width=2.5,
+    method={"user"},
+    techniques={},
 ):
     """
     Activate weight window variance reduction technique.
@@ -1358,10 +1366,14 @@ def weight_window(
     t : array_like[float], optional
         Location of the weight window in t (default None).
     window : array_like[float], optional
-        Bound of the statistic weight of the window (default None).
-    width : array_like[float], optional
-        Statistical width the window will apply (default None).
-
+        Center of the weight windows (default None).
+    width : float, optional
+        Width of the window (default 2.5).
+    epsilon : float, optional
+        Small values used for techniques (default empty list).
+    techniques : list of str, optional
+        List of techniques to use for ww
+        {'user','previous','alpha','min_center','wollaber'} (default {'user'}).
     Returns
     -------
         A weight window card.
@@ -1373,23 +1385,30 @@ def weight_window(
     if width is not None:
         card["ww"]["width"] = width
 
-    if auto == "user":
-        card["ww"]["auto"] = 0
-    elif auto == "previous":
-        card["ww"]["auto"] = 1
-    elif auto == "alpha":
-        card["ww"]["auto"] = 2
-    elif auto == "hybrid":
-        card["ww"]["auto"] = 3
-        card["hybrid"] = True
-        card["deterministic"]["mesh"] = card["ww"]["mesh"]
-    else:
-        print_error(
-            "Weight window auto setting incorrect input: "
-            + auto
-            + ", options are: 'user','previous','alpha','hybrid'"
+    method_checked = check_support(
+        "Weight window method",
+        method,
+        ["user", "previous", "alpha"],
+    )
+    if method_checked == "user":
+        card["ww"]["auto"] = WW_USER
+    elif method_checked == "previous":
+        card["ww"]["auto"] = WW_PREVIOUS
+    elif method_checked == "alpha":
+        card["ww"]["auto"] = WW_ALPHA
+
+    # Checking techniques
+    for tech in techniques:
+        tech_checked = check_support(
+            "Weight window technique",
+            tech[0],
+            ["min-center", "wollaber"],
         )
-    card["ww"]["epsilon"] = epsilon
+        if tech_checked == "min-center":
+            card["ww"]["epsilon"][WW_MIN] = tech[1]
+        elif tech_checked == "wollaber":
+            card["ww"]["epsilon"][WW_WOLLABER] = tech[1]
+            card["ww"]["epsilon"][WW_WOLLABER + 1] = tech[2]
 
     # Set mesh
     if x is not None:
@@ -1436,6 +1455,7 @@ def weight_window(
         card["hybrid"] = True
         card["deterministic"]["mesh"] = card["ww_mesh"]
 
+    card["ww"]["center"] = window
     return card
 
 
