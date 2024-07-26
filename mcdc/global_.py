@@ -86,7 +86,7 @@ class InputDeck:
                 "mesh": make_card_mesh(),
                 "auto": 0.0,
                 "epsilon": 1e-2,
-                },
+            },
             "hybrid": False,
             "deterministic": {},
             "domain_decomposition": False,

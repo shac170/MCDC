@@ -98,16 +98,17 @@ def mesh_tally(
         score_checked = check_support(
             "score type",
             s,
-            ["flux", 
-             "total", 
-             "fission",
-             "sm-xx",
-             "sm-xy",
-             "sm-xz",
-             "sm-yy",
-             "sm-yz",
-             "sm-zz",
-             ],
+            [
+                "flux",
+                "total",
+                "fission",
+                "sm-xx",
+                "sm-xy",
+                "sm-xz",
+                "sm-yy",
+                "sm-yz",
+                "sm-zz",
+            ],
         )
         card.scores.append(score_checked)
 
@@ -115,6 +116,7 @@ def mesh_tally(
     global_.input_deck.mesh_tallies.append(card)
 
     return card
+
 
 def edge_tally(
     x=np.array([-INF, INF]),
@@ -188,9 +190,9 @@ def edge_tally(
     Nx = len(card.x)
     Ny = len(card.y)
     Nz = len(card.z)
-    Nt = len(card.t) - 1 
+    Nt = len(card.t) - 1
     Nmu = len(card.mu) - 1
-    N_azi = len(card.azi) - 1 
+    N_azi = len(card.azi) - 1
     Ng = len(card.g) - 1
     card.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
 
@@ -199,15 +201,16 @@ def edge_tally(
         score_checked = check_support(
             "score type",
             s,
-            ["flux", 
-             "net-current",
-             "sm-xx",
-             "sm-xy",
-             "sm-xz",
-             "sm-yy",
-             "sm-yz",
-             "sm-zz",
-             ],
+            [
+                "flux",
+                "net-current",
+                "sm-xx",
+                "sm-xy",
+                "sm-xz",
+                "sm-yy",
+                "sm-yz",
+                "sm-zz",
+            ],
         )
         card.scores.append(score_checked)
 
@@ -215,6 +218,7 @@ def edge_tally(
     global_.input_deck.edge_tallies.append(card)
 
     return card
+
 
 def surface_tally(
     surface,

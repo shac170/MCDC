@@ -732,6 +732,7 @@ def make_type_mesh_tally(input_deck):
     # Make tally structure
     mesh_tally = into_dtype(struct)
 
+
 def make_type_edge_tally(input_deck):
     global edge_tally
     struct = []
@@ -789,6 +790,7 @@ def make_type_edge_tally(input_deck):
 
     # Make tally structure
     edge_tally = into_dtype(struct)
+
 
 def make_type_surface_tally(input_deck):
     global surface_tally
@@ -978,7 +980,7 @@ def make_type_technique(input_deck):
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
-    
+
     struct += [("ww", into_dtype(ww_list))]
 
     # =========================================================================
@@ -988,14 +990,15 @@ def make_type_technique(input_deck):
     # Constants
     struct += [("wr_threshold", float64), ("wr_survive", float64)]
 
-
     # =========================================================================
     # Hybrid techniques
     # =========================================================================
     hybrid_list = []
     # Mesh for deterministic material idx
     if card["hybrid"]:
-        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi = make_type_mesh_(card["deterministic"]["mesh"])
+        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi = make_type_mesh_(
+            card["deterministic"]["mesh"]
+        )
         Ng = G
         N_dim = 6  # group, x, y, z, mu, phi
     else:
@@ -1004,6 +1007,8 @@ def make_type_technique(input_deck):
     hybrid_list += [("material_idx", int64, (Nt, Nx, Ny, Nz))]
     hybrid_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
     hybrid_list += [("mesh", mesh)]
+    hybrid_list += [("flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
     struct += [("deterministic", into_dtype(hybrid_list))]
     struct += [("integrated_source", float64)]
 

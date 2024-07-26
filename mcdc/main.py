@@ -613,7 +613,11 @@ def prepare():
     # WW mesh
     if input_deck.technique["hybrid"]:
         for name in type_.mesh_names[:-1]:
-            copy_field(mcdc["technique"]["deterministic"]["mesh"], input_deck.technique["deterministic"]["mesh"], name)
+            copy_field(
+                mcdc["technique"]["deterministic"]["mesh"],
+                input_deck.technique["deterministic"]["mesh"],
+                name,
+            )
 
         kernel.hybrid_preprocess(mcdc)
     normalization_factor = 0
@@ -626,14 +630,14 @@ def prepare():
                 dx = 1
             dy = source["box_y"][1] - source["box_y"][0]
             if dy == 0:
-                dy = 1            
+                dy = 1
             dz = source["box_z"][1] - source["box_z"][0]
             if dz == 0:
-                dz = 1            
+                dz = 1
             dt = source["time"][1] - source["time"][0]
             if dt == 0:
                 dt = 1
-            normalization_factor += dx*dy*dz*dt*source["prob"]
+            normalization_factor += dx * dy * dz * dt * source["prob"]
     mcdc["technique"]["integrated_source"] = normalization_factor
 
     # Normalize source probabilities
@@ -678,7 +682,7 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
-            elif score_name.split('-')[0] == "sm":
+            elif score_name.split("-")[0] == "sm":
                 score_type = SCORE_SECOND_MOMENT
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
@@ -727,7 +731,7 @@ def prepare():
         # Set tally stride and accumulate total tally size
         mcdc["mesh_tallies"][i]["stride"]["tally"] = tally_size
         tally_size += mcdc["mesh_tallies"][i]["N_bin"]
-    
+
     # Edge tallies
     for i in range(N_edge_tally):
         # Direct assignment
@@ -754,9 +758,9 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
-            elif score_name.split('-')[0] == "sm":
+            elif score_name.split("-")[0] == "sm":
                 score_type = SCORE_SECOND_MOMENT
-                        
+
             mcdc["edge_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -764,13 +768,13 @@ def prepare():
         Ns = 1 + N_sensitivity
         if input_deck.technique["dsm_order"] == 2:
             Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-        Nmu = len(input_deck.edge_tallies[i].mu) 
-        N_azi = len(input_deck.edge_tallies[i].azi) 
-        Ng = len(input_deck.edge_tallies[i].g) 
-        Nx = len(input_deck.edge_tallies[i].x) 
-        Ny = len(input_deck.edge_tallies[i].y) 
-        Nz = len(input_deck.edge_tallies[i].z) 
-        Nt = len(input_deck.edge_tallies[i].t) 
+        Nmu = len(input_deck.edge_tallies[i].mu)
+        N_azi = len(input_deck.edge_tallies[i].azi)
+        Ng = len(input_deck.edge_tallies[i].g)
+        Nx = len(input_deck.edge_tallies[i].x)
+        Ny = len(input_deck.edge_tallies[i].y)
+        Nz = len(input_deck.edge_tallies[i].z)
+        Nt = len(input_deck.edge_tallies[i].t)
 
         # Update N_bin
         mcdc["edge_tallies"][i]["N_bin"] *= Ns * N_score
@@ -803,7 +807,7 @@ def prepare():
 
         # Set tally stride and accumulate total tally size
         mcdc["edge_tallies"][i]["stride"]["tally"] = tally_size
-        
+
         tally_size += mcdc["edge_tallies"][i]["N_bin"]
     # Surface tallies
     for i in range(N_surface_tally):
@@ -946,19 +950,21 @@ def prepare():
     # =========================================================================
     # Weight window (WW)
     # =========================================================================
+    if input_deck.technique["weight_window"]:
+        # WW mesh
+        for name in type_.mesh_names[:-1]:
+            copy_field(
+                mcdc["technique"]["ww"]["mesh"],
+                input_deck.technique["ww"]["mesh"],
+                name,
+            )
 
-    # WW mesh
-    for name in type_.mesh_names[:-1]:
-        copy_field(mcdc["technique"]["ww"]["mesh"], input_deck.technique["ww"]["mesh"], name)
+        # WW windows
 
-    # WW windows
-   
-    mcdc["technique"]["ww"]["width"] = input_deck.technique["ww"]["width"]
-    mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
-    mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
-    mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
-
-
+        mcdc["technique"]["ww"]["width"] = input_deck.technique["ww"]["width"]
+        mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
+        mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
+        mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
 
     # =========================================================================
     # Weight roulette
@@ -1284,15 +1290,28 @@ def generate_hdf5(data, mcdc):
                     input_deck.technique, input_group.create_group("technique")
                 )
             # Store deterministic problem
-            det = mcdc["technique"]["deterministic"]
-            f.create_dataset(
-                            "input_deck/deterministic/source",
-                            data=np.squeeze(det["source"]),
-                        )
-            f.create_dataset(
-                            "input_deck/deterministic/material_idx",
-                            data=np.squeeze(det["material_idx"]),
-                        )
+            if mcdc["technique"]["hybrid"]:
+                det = mcdc["technique"]["deterministic"]
+                f.create_dataset(
+                    "input_deck/deterministic/source",
+                    data=np.squeeze(det["source"]),
+                )
+                f.create_dataset(
+                    "input_deck/deterministic/material_idx",
+                    data=np.squeeze(det["material_idx"]),
+                )
+                f.create_dataset(
+                    "input_deck/deterministic/flux",
+                    data=np.squeeze(det["flux"]),
+                )
+                f.create_dataset(
+                    "input_deck/deterministic/current",
+                    data=np.squeeze(det["current"]),
+                )
+                f.create_dataset(
+                    "tallies/normalization_factor",
+                    data=mcdc["technique"]["integrated_source"],
+                )
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:
@@ -1392,9 +1411,9 @@ def generate_hdf5(data, mcdc):
                 Nmu = len(mesh["mu"]) - 1
                 N_azi = len(mesh["azi"]) - 1
                 Ng = len(mesh["g"]) - 1
-                Nx = len(mesh["x"]) 
-                Ny = len(mesh["y"]) 
-                Nz = len(mesh["z"]) 
+                Nx = len(mesh["x"])
+                Ny = len(mesh["y"])
+                Nz = len(mesh["z"])
                 Nt = len(mesh["t"]) - 1
                 N_score = tally["N_score"]
 
@@ -1498,7 +1517,6 @@ def generate_hdf5(data, mcdc):
                 elif method == 3:
                     f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
                 # dump x,y,z scalar flux across all groups
-
 
             # Eigenvalues
             if mcdc["setting"]["mode_eigenvalue"]:

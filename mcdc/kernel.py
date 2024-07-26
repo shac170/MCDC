@@ -2109,7 +2109,7 @@ def mesh_crossing_evaluate(P, mesh):
     t2, x2, y2, z2, outside2 = mesh_get_index(P, mesh)
     # Return particle to initial position
     shift_particle(P, -2 * SHIFT)
-    
+
     # Determine dimension crossed
     directions = []
 
@@ -2141,7 +2141,6 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
     mu, azi = mesh_get_angular_index(P, mesh)
     g, outside_energy = mesh_get_energy_index(P, mesh, mcdc["setting"]["mode_MG"])
 
-    
     # Outside grid?
     if outside or outside_energy:
         return
@@ -2175,6 +2174,7 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
             score = flux * mu * mu
         tally_bin[TALLY_SCORE, idx + i] += score
 
+
 @njit
 def score_edge_tally(P, tally, data, mcdc):
     tally_bin = data[TALLY]
@@ -2185,23 +2185,23 @@ def score_edge_tally(P, tally, data, mcdc):
     # Get indices
     s = P["sensitivity_ID"]
     shift_particle(P, -SHIFT)
-    ix, iy, iz, it, directions = mesh_crossing_evaluate(P,mesh)
+    ix, iy, iz, it, directions = mesh_crossing_evaluate(P, mesh)
     shift_particle(P, SHIFT)
 
     if len(directions) == 0:
-        if abs(P["x"] - mesh["x"][0]) < 1/INF:
+        if abs(P["x"] - mesh["x"][0]) < 1 / INF:
             mu = P["ux"]
-        elif abs(P["x"] - mesh["x"][-1]) < 1/INF:
+        elif abs(P["x"] - mesh["x"][-1]) < 1 / INF:
             mu = P["ux"]
             ix += 1
-        elif abs(P["y"] - mesh["y"][0]) < 1/INF:
+        elif abs(P["y"] - mesh["y"][0]) < 1 / INF:
             mu = P["uy"]
-        elif abs(P["y"] - mesh["y"][-1]) < 1/INF:
+        elif abs(P["y"] - mesh["y"][-1]) < 1 / INF:
             mu = P["uy"]
             iy += 1
-        elif abs(P["z"] - mesh["z"][0]) < 1/INF:
+        elif abs(P["z"] - mesh["z"][0]) < 1 / INF:
             mu = P["uz"]
-        elif abs(P["z"] - mesh["z"][-1]) < 1/INF:
+        elif abs(P["z"] - mesh["z"][-1]) < 1 / INF:
             mu = P["uz"]
             iz += 1
         else:
@@ -2251,6 +2251,7 @@ def score_edge_tally(P, tally, data, mcdc):
             score = flux * mu * mu
 
         tally_bin[TALLY_SCORE, idx + i] += score
+
 
 @njit
 def score_surface_tally(P, surface, tally, data, mcdc):
@@ -2636,7 +2637,9 @@ def move_to_event(P, data, mcdc):
     move_particle(P, distance, mcdc)
 
     # Score crossing tallies
-    if mcdc["cycle_active"] and (event & EVENT_MESH or event & EVENT_SURFACE or event & EVENT_LATTICE):
+    if mcdc["cycle_active"] and (
+        event & EVENT_MESH or event & EVENT_SURFACE or event & EVENT_LATTICE
+    ):
         for tally in mcdc["edge_tallies"]:
             score_edge_tally(P, tally, data, mcdc)
 
@@ -3486,39 +3489,41 @@ def branchless_collision(P, prog):
 def weight_window(P, prog):
     mcdc = adapt.device(prog)
     # Kill particle below "infinitely" small cutoff
-    if P["w"] < 1/INF:
+    if P["w"] < 1 / INF:
         P["alive"] = False
     else:
         # Get indices
         t, x, y, z, outside = mesh_get_index(P, mcdc["technique"]["ww"]["mesh"])
 
-        # Set target weight 
+        # Set target weight
         epsilon = mcdc["technique"]["ww"]["epsilon"]
 
         # My method
-        #w_target = (mcdc["technique"]["ww"][t, x, y, z])*(1-epsilon)+epsilon
+        # w_target = (mcdc["technique"]["ww"][t, x, y, z])*(1-epsilon)+epsilon
 
         # Wollaber Modification
         epsi = 1e-4
-        window = mcdc["technique"]["ww"]["center"][t, x, y, z]*(1-epsi)+epsi
-        w_min = 0.01#np.min(window[window!=0])
-        
-        w_target = (window)*(1+(1/epsilon-1)*np.exp(-(window-w_min)/epsilon))
+        window = mcdc["technique"]["ww"]["center"][t, x, y, z] * (1 - epsi) + epsi
+        w_min = 0.01  # np.min(window[window!=0])
+
+        w_target = (window) * (
+            1 + (1 / epsilon - 1) * np.exp(-(window - w_min) / epsilon)
+        )
 
         # Window width
         width = mcdc["technique"]["ww"]["width"]
 
         # upper limit
-        ulimit = w_target*width
+        ulimit = w_target * width
 
-        # lower limit 
-        llimit = w_target/width
+        # lower limit
+        llimit = w_target / width
 
         # If above target
         if P["w"] > ulimit:
 
             # Splitting
-            n_split = math.ceil(P["w"]/ulimit)
+            n_split = math.ceil(P["w"] / ulimit)
 
             # Set target weight
             P["w"] /= n_split
@@ -3528,30 +3533,35 @@ def weight_window(P, prog):
             P["alive"] = False
 
         # Below target
-        elif P['w'] < llimit:
+        elif P["w"] < llimit:
 
             # Russian roulette
             # Survival weight
-            w_survival = 1.1*llimit
+            w_survival = 1.1 * llimit
 
             xi = rng(P)
-            
-            if xi > P["w"]/w_survival:
+
+            if xi > P["w"] / w_survival:
                 P["alive"] = False
             else:
                 P["w"] = w_survival
 
 
 def write_output(file, idx_census, t, x_mid, data, method, epsilon, width):
-    with open(file, 'a' if idx_census > 2 else 'w') as f:
+    with open(file, "a" if idx_census > 2 else "w") as f:
         if idx_census == 2:
-            f.write(f"Weight Window Output\n Method: {method}\nWindow width,{width}\nEpsilon,{epsilon}\n")
-        f.write(f"\ntimestep,{idx_census}\nSim Time,{t[idx_census]},dt:,{t[idx_census] - t[idx_census - 1]}\n")
+            f.write(
+                f"Weight Window Output\n Method: {method}\nWindow width,{width}\nEpsilon,{epsilon}\n"
+            )
+        f.write(
+            f"\ntimestep,{idx_census}\nSim Time,{t[idx_census]},dt:,{t[idx_census] - t[idx_census - 1]}\n"
+        )
         f.write("x: ," + ", ".join(f"{val:.6e}" for val in x_mid) + "\n")
         for key, values in data.items():
             f.write(f"{key}: ," + ", ".join(f"{val:.6e}" for val in values) + "\n")
 
-def get_flux(idx,mcdc,data):
+
+def get_flux(idx, mcdc, data):
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         if mcdc["technique"]["iQMC"]:
             break
@@ -3562,11 +3572,7 @@ def get_flux(idx,mcdc,data):
         N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
         Ns = 1 + N_sensitivity
         if mcdc["technique"]["dsm_order"] == 2:
-            Ns = (
-                1
-                + 2 * N_sensitivity
-                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-            )
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
         Nmu = len(mesh["mu"]) - 1
         N_azi = len(mesh["azi"]) - 1
         Ng = len(mesh["g"]) - 1
@@ -3599,7 +3605,8 @@ def get_flux(idx,mcdc,data):
                 sdev = score_tally_bin[TALLY_SUM_SQ]
                 return mean[idx][:]
 
-def get_current(idx,mcdc,data):
+
+def get_current(idx, mcdc, data):
     for ID, tally in enumerate(mcdc["edge_tallies"]):
         if mcdc["technique"]["iQMC"]:
             break
@@ -3610,17 +3617,13 @@ def get_current(idx,mcdc,data):
         N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
         Ns = 1 + N_sensitivity
         if mcdc["technique"]["dsm_order"] == 2:
-            Ns = (
-                1
-                + 2 * N_sensitivity
-                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-            )
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
         Nmu = len(mesh["mu"]) - 1
         N_azi = len(mesh["azi"]) - 1
         Ng = len(mesh["g"]) - 1
-        Nx = len(mesh["x"]) 
-        Ny = len(mesh["y"]) 
-        Nz = len(mesh["z"]) 
+        Nx = len(mesh["x"])
+        Ny = len(mesh["y"])
+        Nz = len(mesh["z"])
         Nt = len(mesh["t"]) - 1
         N_score = tally["N_score"]
 
@@ -3645,11 +3648,18 @@ def get_current(idx,mcdc,data):
             if score_type == SCORE_NET_CURRENT:
                 mean = score_tally_bin[TALLY_SUM]
                 sdev = score_tally_bin[TALLY_SUM_SQ]
-                return mean[idx][:,0,0]
+                return mean[idx][:, 0, 0]
 
-def get_state(idx,mcdc,data):
-    dt = abs(mcdc["technique"]["ww"]["mesh"]['t'][idx+1] - mcdc["technique"]["ww"]["mesh"]['t'][idx])
-    dx = abs(mcdc["technique"]["ww"]["mesh"]['x'][1:] - mcdc["technique"]["ww"]["mesh"]['x'][:-1])
+
+def get_state(idx, mcdc, data):
+    dt = abs(
+        mcdc["technique"]["ww"]["mesh"]["t"][idx + 1]
+        - mcdc["technique"]["ww"]["mesh"]["t"][idx]
+    )
+    dz = abs(
+        mcdc["technique"]["ww"]["mesh"]["z"][1:]
+        - mcdc["technique"]["ww"]["mesh"]["z"][:-1]
+    )
     N_particle = mcdc["setting"]["N_particle"]
     # Setting up deterministic problem
     det = mcdc["technique"]["deterministic"]
@@ -3658,21 +3668,21 @@ def get_state(idx,mcdc,data):
     Nx = len(mesh["x"]) - 1
     Ny = len(mesh["y"]) - 1
     Nz = len(mesh["z"]) - 1
-    Sigma_t = np.zeros(len(np.squeeze(det["material_idx"])[idx,:]))
-    Sigma_s = np.zeros(len(np.squeeze(det["material_idx"])[idx,:]))
-    Sigma_f = np.zeros(len(np.squeeze(det["material_idx"])[idx,:]))
+    Sigma_t = np.zeros(len(np.squeeze(det["material_idx"])[idx, :]))
+    Sigma_s = np.zeros(len(np.squeeze(det["material_idx"])[idx, :]))
+    Sigma_f = np.zeros(len(np.squeeze(det["material_idx"])[idx, :]))
     materials = mcdc["materials"]
     for i in range(len(Sigma_t)):
-        mat_idx = np.squeeze(det["material_idx"])[idx,:][i]
-        Sigma_t[i] = materials[mat_idx]["capture"][0]+ materials[mat_idx]["scatter"][0]
+        mat_idx = np.squeeze(det["material_idx"])[idx, :][i]
+        Sigma_t[i] = materials[mat_idx]["capture"][0] + materials[mat_idx]["scatter"][0]
         Sigma_s[i] = materials[mat_idx]["scatter"][0]
         Sigma_f[i] = materials[mat_idx]["fission"][0]
     # Create cross section class
     cross_sections = CrossSections(Sigma_t, Sigma_s, Sigma_f, nu=2.3)
     # Create deterministic mesh class
-    mesh = Mesh(Nx, dx, Nt, dt)
+    mesh = Mesh(Nz, dz, Nt, dt)
     # Create discretized source class
-    source = np.squeeze(det["source"])[idx,:]
+    source = np.squeeze(det["source"])[idx, :]
     source_term = Source(source, v=1.0, lb=1.0, rb=0.0)
     # Create the problem class
     problem = Problem(cross_sections, mesh, source_term)
@@ -3688,17 +3698,13 @@ def get_state(idx,mcdc,data):
         N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
         Ns = 1 + N_sensitivity
         if mcdc["technique"]["dsm_order"] == 2:
-            Ns = (
-                1
-                + 2 * N_sensitivity
-                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-            )
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
         Nmu = len(mesh["mu"]) - 1
         N_azi = len(mesh["azi"]) - 1
         Ng = len(mesh["g"]) - 1
-        Nx = len(mesh["x"]) 
-        Ny = len(mesh["y"]) 
-        Nz = len(mesh["z"]) 
+        Nx = len(mesh["x"])
+        Ny = len(mesh["y"])
+        Nz = len(mesh["z"])
         Nt = len(mesh["t"]) - 1
         N_score = tally["N_score"]
 
@@ -3722,13 +3728,13 @@ def get_state(idx,mcdc,data):
             score_tally_bin = np.squeeze(tally_bin[i])
             if score_type == SCORE_NET_CURRENT:
                 mean = score_tally_bin[TALLY_SUM]
-                J =  mean[idx][:,0,0]
+                J = mean[idx][0, 0, :]
             elif score_type == SCORE_FLUX:
                 mean = score_tally_bin[TALLY_SUM]
-                phi_edge =  mean[idx][:,0,0]
+                phi_edge = mean[idx][0, 0, :]
             elif score_type == SCORE_SECOND_MOMENT:
                 mean = score_tally_bin[TALLY_SUM]
-                SM_edge =  mean[idx][:,0,0]
+                SM_edge = mean[idx][0, 0, :]
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         if mcdc["technique"]["iQMC"]:
             break
@@ -3739,11 +3745,7 @@ def get_state(idx,mcdc,data):
         N_sensitivity = int(mcdc["setting"]["N_sensitivity"])
         Ns = 1 + N_sensitivity
         if mcdc["technique"]["dsm_order"] == 2:
-            Ns = (
-                1
-                + 2 * N_sensitivity
-                + int(0.5 * N_sensitivity * (N_sensitivity - 1))
-            )
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
         Nmu = len(mesh["mu"]) - 1
         N_azi = len(mesh["azi"]) - 1
         Ng = len(mesh["g"]) - 1
@@ -3773,39 +3775,54 @@ def get_state(idx,mcdc,data):
             score_tally_bin = np.squeeze(tally_bin[i])
             if score_type == SCORE_FLUX:
                 mean = score_tally_bin[TALLY_SUM]
-                phi =  mean[idx][:]
+                phi = mean[idx][:]
             elif score_type == SCORE_SECOND_MOMENT:
                 mean = score_tally_bin[TALLY_SUM]
-                SM =  mean[idx][:]           
-        
-    det_flux = np.zeros(len(phi)+2)
-    det_flux[1:-1] = phi* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
-    det_flux[0] = phi_edge[0]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
-    det_flux[-1] = phi_edge[-1]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+                SM = mean[idx][:]
 
-    F = np.zeros(len(phi)+2)
-    #F[1:-1] = SM* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
-    #F[0] = SM_edge[0]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
-    #F[-1] = SM_edge[-1]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    det_flux = np.zeros(len(phi) + 2)
+    det_flux[1:-1] = (
+        phi * mcdc["technique"]["integrated_source"] / (dz[0] * dt * N_particle)
+    )
+    det_flux[0] = (
+        phi_edge[0] * mcdc["technique"]["integrated_source"] / (dz[0] * dt * N_particle)
+    )
+    det_flux[-1] = (
+        phi_edge[-1]
+        * mcdc["technique"]["integrated_source"]
+        / (dz[0] * dt * N_particle)
+    )
 
-    current = J * mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    F = np.zeros(len(phi) + 2)
+    # F[1:-1] = SM* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    # F[0] = SM_edge[0]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    # F[-1] = SM_edge[-1]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+
+    current = J * mcdc["technique"]["integrated_source"] / (dt * N_particle)
 
     # Creating initial condition state class
-    state = State(det_flux,current)
+    state = State(det_flux, current)
     state.F = F
     return state, problem
 
-def ww_auto(data,mcdc, dump=True):
-    idx_n0 = mcdc["idx_census"] 
-    idx_n1 = idx_n0 - 1
-    idx_n2 = idx_n1 - 1 
 
-    dt = abs(mcdc["technique"]["ww"]["mesh"]['t'][idx_n0] - mcdc["technique"]["ww"]["mesh"]['t'][idx_n1])
-    dx = abs(mcdc["technique"]["ww"]["mesh"]['x'][1:] - mcdc["technique"]["ww"]["mesh"]['x'][:-1])
+def ww_auto(data, mcdc, dump=True):
+    idx_n0 = mcdc["idx_census"]
+    idx_n1 = idx_n0 - 1
+    idx_n2 = idx_n1 - 1
+
+    dt = abs(
+        mcdc["technique"]["ww"]["mesh"]["t"][idx_n0]
+        - mcdc["technique"]["ww"]["mesh"]["t"][idx_n1]
+    )
+    dx = abs(
+        mcdc["technique"]["ww"]["mesh"]["z"][1:]
+        - mcdc["technique"]["ww"]["mesh"]["z"][:-1]
+    )
     N_particle = mcdc["setting"]["N_particle"]
-    flux = get_flux(idx_n1,mcdc,data)
-    # Normalizing tallies 
-    flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
+    flux = get_flux(idx_n1, mcdc, data)
+    # Normalizing tallies
+    flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
 
     # Window width
     width = mcdc["technique"]["ww"]["width"]
@@ -3816,7 +3833,7 @@ def ww_auto(data,mcdc, dump=True):
     # User supplied weight windows
     if method == 0:
         return
-    
+
     # Previous timestep weight windows
     elif method == 1:
         mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = flux / np.max(flux)
@@ -3824,9 +3841,9 @@ def ww_auto(data,mcdc, dump=True):
 
     # Alpha approximation weight windows
     elif method == 2:
-        old_flux =  get_flux(idx_n2,mcdc,data)
-        # Normalizing tallies 
-        old_flux *= mcdc["technique"]["integrated_source"]/(dx * dt * N_particle)
+        old_flux = get_flux(idx_n2, mcdc, data)
+        # Normalizing tallies
+        old_flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
 
         alpha = np.ones_like(flux)
         mask = old_flux != 0
@@ -3842,24 +3859,33 @@ def ww_auto(data,mcdc, dump=True):
     elif method == 3:
 
         # Creating initial condition state class
-        old_state, problem = get_state(idx_n1,mcdc,data)
+        old_state, problem = get_state(idx_n1, mcdc, data)
+        # old_state.flux = mcdc["technique"]["deterministic"]["flux"][idx_n1,0,0,:,0]
+        # old_state.current = mcdc["technique"]["deterministic"]["current"][idx_n1,0,0,:,0]
 
         # Solve SM equations for solution state on next timestep
-        new_state = losm_timestep(old_state,old_state,problem)
+        new_state = losm_timestep(old_state, old_state, problem)
         new_flux = new_state.flux[1:-1]
         new_current = new_state.current[:-1]
+        print(mcdc["technique"]["deterministic"]["flux"].shape, idx_n0)
+        mcdc["technique"]["deterministic"]["flux"][idx_n0, 0, 0, :, 0] = new_state.flux
+        mcdc["technique"]["deterministic"]["current"][
+            idx_n0, 0, 0, :, 0
+        ] = new_state.current
 
         # Assign weight windows according to new flux
-        mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = new_flux/np.max(new_flux)
-        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = new_flux
+        mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :] = new_flux / np.max(new_flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, 0, 0, :] = new_flux
 
-    #write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
+    # write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
+
 
 # ==============================================================================
 # Hybrid Methods
 # ==============================================================================
 
 # Classes ------------------------------------------------------------------------
+
 
 class CrossSections:
     def __init__(self, Sigma_t, Sigma_s, Sigma_f, nu):
@@ -3868,39 +3894,43 @@ class CrossSections:
         self.Sigma_f = Sigma_f
         self.nu = nu
 
+
 class Quadrature:
     def __init__(self, mu, w):
         self.mu = mu
         self.w = w
         self.N_mu = len(mu)
 
+
 class Mesh:
-    def __init__(self, Nx, dx, Nt, dt,quadrature=None):
+    def __init__(self, Nx, dx, Nt, dt, quadrature=None):
         self.dx = dx
         self.Nx = Nx
         self.dt = dt
         self.Nt = Nt
         self.quad = quadrature
-        x_edge = np.zeros(Nx+1)
-        for i in range(1,Nx+1):
-            x_edge[i] = x_edge[i-1]+dx[i-1]
-        x = np.zeros(Nx+2)
-        x[1:-1] = x_edge[1:]-0.5*dx
+        x_edge = np.zeros(Nx + 1)
+        for i in range(1, Nx + 1):
+            x_edge[i] = x_edge[i - 1] + dx[i - 1]
+        x = np.zeros(Nx + 2)
+        x[1:-1] = x_edge[1:] - 0.5 * dx
         x[0] = x_edge[0]
         x[-1] = x_edge[-1]
         self.x = x
         self.x_edge = x_edge
-        t = np.zeros(Nt+1)
-        for i in range(1,Nt+1):
-            t[i] = t[i-1]+dt
+        t = np.zeros(Nt + 1)
+        for i in range(1, Nt + 1):
+            t[i] = t[i - 1] + dt
         self.t = t
 
+
 class Source:
-    def __init__(self, q, v,lb,rb):
+    def __init__(self, q, v, lb, rb):
         self.q = q
         self.v = v
         self.lb = lb
         self.rb = rb
+
 
 class Problem:
     def __init__(self, cross_sections, mesh, source):
@@ -3908,12 +3938,14 @@ class Problem:
         self.mesh = mesh
         self.source = source
 
+
 class iter_data:
-    def __init__(self, n_iter,epsilon = 1e-10, n_max = 1000):
+    def __init__(self, n_iter, epsilon=1e-10, n_max=1000):
         self.n_iter = n_iter
-        self.difference= []
+        self.difference = []
         self.epsilon = epsilon
         self.n_max = n_max
+
 
 class State:
     def __init__(self, flux, current):
@@ -3929,11 +3961,11 @@ class State:
         self.residual = []
         self.iterations = []
 
+
 def hybrid_preprocess(mcdc):
     # generate material index
     hybrid_generate_material_idx(mcdc)
     hybrid_prepare_source(mcdc)
-
 
 
 def hybrid_generate_material_idx(mcdc):
@@ -3991,12 +4023,14 @@ def hybrid_generate_material_idx(mcdc):
                     material_ID = get_particle_material(P_temp, mcdc)
 
                     # assign material index
-                    mcdc["technique"]["deterministic"]["material_idx"][t, i, j, k] = material_ID
+                    mcdc["technique"]["deterministic"]["material_idx"][
+                        t, i, j, k
+                    ] = material_ID
 
 
 def hybrid_prepare_source(mcdc):
     """
-    Iterates through all spatial cells to calculate the deterministic source. 
+    Iterates through all spatial cells to calculate the deterministic source.
     """
     det = mcdc["technique"]["deterministic"]
 
@@ -4019,16 +4053,19 @@ def hybrid_prepare_source(mcdc):
                     z = z_mid[k]
                     for source in mcdc["sources"]:
                         if source["box"] == 0:
-                            if x == source["x"] and y == source["y"] and x == source["y"]:
-                                det["source"][:,t,i,j,k] = source["prob"]
+                            if (
+                                x == source["x"]
+                                and y == source["y"]
+                                and x == source["y"]
+                            ):
+                                det["source"][:, t, i, j, k] = source["prob"]
                         else:
                             in_x = source["box_x"][0] <= x <= source["box_x"][1]
                             in_y = source["box_y"][0] <= y <= source["box_y"][1]
                             in_z = source["box_z"][0] <= z <= source["box_z"][1]
                             if in_x and in_y and in_z:
-                                det["source"][:,t,i,j,k] = source["prob"]
-   
-    
+                                det["source"][:, t, i, j, k] = source["prob"]
+
 
 def losm_timestep(current_state, previous_state, problem):
     """
@@ -4054,20 +4091,22 @@ def losm_timestep(current_state, previous_state, problem):
     Nx = problem.mesh.Nx
     Nt = problem.mesh.Nt
     v = problem.source.v
-    Sigma_t = problem.xs.Sigma_t + 1/(v*dt)
+    Sigma_t = problem.xs.Sigma_t + 1 / (v * dt)
     Sigma_s = problem.xs.Sigma_s
     Sigma_f = problem.xs.Sigma_f
     nu = problem.xs.nu
     left_bc = problem.source.lb
     right_bc = problem.source.rb
-    
-    dx_edge = np.zeros(Nx+1)
-    dx_edge[1:-1] = (dx[:-1]+dx[1:])/2
-    dx_edge[0] = dx[0]/2
-    dx_edge[-1] = dx[-1]/2
 
-    Sigma_t_edge = np.zeros(Nx+1)
-    Sigma_t_edge[1:-1] = (Sigma_t[:-1]*dx[:-1]+Sigma_t[1:]*dx[1:])/(dx[:-1]+dx[1:])
+    dx_edge = np.zeros(Nx + 1)
+    dx_edge[1:-1] = (dx[:-1] + dx[1:]) / 2
+    dx_edge[0] = dx[0] / 2
+    dx_edge[-1] = dx[-1] / 2
+
+    Sigma_t_edge = np.zeros(Nx + 1)
+    Sigma_t_edge[1:-1] = (Sigma_t[:-1] * dx[:-1] + Sigma_t[1:] * dx[1:]) / (
+        dx[:-1] + dx[1:]
+    )
     Sigma_t_edge[0] = Sigma_t[0]
     Sigma_t_edge[-1] = Sigma_t[-1]
 
@@ -4075,72 +4114,129 @@ def losm_timestep(current_state, previous_state, problem):
     Pl = current_state.Pl
     Pr = current_state.Pr
 
-    q0 = q + phi_prev/(v*dt)
-    q1 = J_prev/(v*dt)
-    
+    q0 = q + phi_prev / (v * dt)
+    q1 = J_prev / (v * dt)
+
     # Coefficients for the tridiagonal matrix
-    a = np.zeros(Nx+1)
-    b = np.zeros(Nx+2)
-    c = np.zeros(Nx+1)
-    d = np.zeros(Nx+2)
+    a = np.zeros(Nx + 1)
+    b = np.zeros(Nx + 2)
+    c = np.zeros(Nx + 1)
+    d = np.zeros(Nx + 2)
     for i in range(0, Nx):
-        a[i] = -1/(3*Sigma_t_edge[i]*dx_edge[i])
-        b[i+1] = 1/(3*Sigma_t_edge[i]*dx_edge[i]) + 1/(3*Sigma_t_edge[i+1]*dx_edge[i+1]) +(Sigma_t[i]-Sigma_s[i]-nu*Sigma_f[i])*dx[i]
-        c[i+1] = -1/(3*Sigma_t_edge[i+1]*dx_edge[i+1])
-        d[i+1] = q0[i]*dx[i] - (F[i+2]-F[i+1])/(Sigma_t_edge[i+1]*dx_edge[i+1]) + (F[i+1]-F[i])/(Sigma_t_edge[i]*dx_edge[i]) \
-            + q1[i]/Sigma_t_edge[i] - q1[i+1]/Sigma_t_edge[i+1]
+        a[i] = -1 / (3 * Sigma_t_edge[i] * dx_edge[i])
+        b[i + 1] = (
+            1 / (3 * Sigma_t_edge[i] * dx_edge[i])
+            + 1 / (3 * Sigma_t_edge[i + 1] * dx_edge[i + 1])
+            + (Sigma_t[i] - Sigma_s[i] - nu * Sigma_f[i]) * dx[i]
+        )
+        c[i + 1] = -1 / (3 * Sigma_t_edge[i + 1] * dx_edge[i + 1])
+        d[i + 1] = (
+            q0[i] * dx[i]
+            - (F[i + 2] - F[i + 1]) / (Sigma_t_edge[i + 1] * dx_edge[i + 1])
+            + (F[i + 1] - F[i]) / (Sigma_t_edge[i] * dx_edge[i])
+            + q1[i] / Sigma_t_edge[i]
+            - q1[i + 1] / Sigma_t_edge[i + 1]
+        )
 
     # Boundary conditions
     # Vacuum
     if left_bc == 0:
-        b[0] = 1/(3*Sigma_t_edge[0]*dx_edge[0])+(Sigma_t[0]-Sigma_s[0]-nu*Sigma_f[0])*dx[0]
-        c[0] = -1/(6*Sigma_t_edge[0]*dx_edge[0])
-        d[0] = q0[0]*dx[0] + (F[1]-F[0])/(Sigma_t_edge[0]*dx_edge[0])+ q1[0]/Sigma_t_edge[0] + Pl
-    #Refl
+        b[0] = (
+            1 / (3 * Sigma_t_edge[0] * dx_edge[0])
+            + (Sigma_t[0] - Sigma_s[0] - nu * Sigma_f[0]) * dx[0]
+        )
+        c[0] = -1 / (6 * Sigma_t_edge[0] * dx_edge[0])
+        d[0] = (
+            q0[0] * dx[0]
+            + (F[1] - F[0]) / (Sigma_t_edge[0] * dx_edge[0])
+            + q1[0] / Sigma_t_edge[0]
+            + Pl
+        )
+    # Refl
     elif left_bc == 1:
-        b[0] = 1/(3*Sigma_t_edge[0]*dx[0])+(Sigma_t[0]-Sigma_s[0]-nu*Sigma_f[0])*dx[0]
-        c[0] = -1/(3*Sigma_t_edge[0]*dx[0])
-        d[0] = q0[0]*dx[0] + (F[1]-F[0])/(Sigma_t_edge[0]*dx_edge[0])+ q1[0]/Sigma_t_edge[0]
+        b[0] = (
+            1 / (3 * Sigma_t_edge[0] * dx[0])
+            + (Sigma_t[0] - Sigma_s[0] - nu * Sigma_f[0]) * dx[0]
+        )
+        c[0] = -1 / (3 * Sigma_t_edge[0] * dx[0])
+        d[0] = (
+            q0[0] * dx[0]
+            + (F[1] - F[0]) / (Sigma_t_edge[0] * dx_edge[0])
+            + q1[0] / Sigma_t_edge[0]
+        )
 
-    if right_bc == 0:  
-        a[-1] = -1/(6*Sigma_t[-1]*dx[-1])
-        b[-1] = 1/(3*Sigma_t[-1]*dx[-1])-(Sigma_t[-1]-Sigma_s[-1]-nu*Sigma_f[-1])*dx[-1]
-        d[-1] = q0[-1]*dx[-1] + (F[-1]-F[-2])/(Sigma_t[-1]*dx[-1])+ q1[-1]/Sigma_t[-1] - Pr
+    if right_bc == 0:
+        a[-1] = -1 / (6 * Sigma_t[-1] * dx[-1])
+        b[-1] = (
+            1 / (3 * Sigma_t[-1] * dx[-1])
+            - (Sigma_t[-1] - Sigma_s[-1] - nu * Sigma_f[-1]) * dx[-1]
+        )
+        d[-1] = (
+            q0[-1] * dx[-1]
+            + (F[-1] - F[-2]) / (Sigma_t[-1] * dx[-1])
+            + q1[-1] / Sigma_t[-1]
+            - Pr
+        )
 
     elif right_bc == 1:
-        a[-1] = -1/(3*Sigma_t[-1]*dx[-1])
-        b[-1] = 1/(3*Sigma_t[-1]*dx[-1])-(Sigma_t[-1]-Sigma_s[-1]-nu*Sigma_f[-1])*dx[-1]
-        d[-1] = q0[-1]*dx[-1] + (F[-1]-F[-2])/(Sigma_t[-1]*dx[-1])+ q1[-1]/Sigma_t[-1] 
-  
+        a[-1] = -1 / (3 * Sigma_t[-1] * dx[-1])
+        b[-1] = (
+            1 / (3 * Sigma_t[-1] * dx[-1])
+            - (Sigma_t[-1] - Sigma_s[-1] - nu * Sigma_f[-1]) * dx[-1]
+        )
+        d[-1] = (
+            q0[-1] * dx[-1]
+            + (F[-1] - F[-2]) / (Sigma_t[-1] * dx[-1])
+            + q1[-1] / Sigma_t[-1]
+        )
+
     # Solve the tridiagonal system using TDMA (Thomas algorithm)
 
-    phi = tdma(a,b,c, d)
+    phi = tdma(a, b, c, d)
 
-    
     # Update current using the updated scalar flux
 
-    J = np.zeros(Nx+1)
+    J = np.zeros(Nx + 1)
     if left_bc == 0:
-        J[0] = (phi[0]-phi[1])/(3*Sigma_t_edge[0]*dx_edge[0]) + q1[0]/Sigma_t_edge[0] + (F[1]-F[0])/(Sigma_t_edge[0]*dx_edge[0]) 
-        #J[0] = -0.5*phi[0]+Pl
+        J[0] = (
+            (phi[0] - phi[1]) / (3 * Sigma_t_edge[0] * dx_edge[0])
+            + q1[0] / Sigma_t_edge[0]
+            + (F[1] - F[0]) / (Sigma_t_edge[0] * dx_edge[0])
+        )
+        # J[0] = -0.5*phi[0]+Pl
     elif left_bc == 1:
         J[0] = 0
     if right_bc == 0:
-        J[-1] = (phi[-2]-phi[-1])/(3*Sigma_t_edge[-1]*dx_edge[-1]) + q1[-1]/Sigma_t_edge[-1] + (F[-1]-F[-2])/(Sigma_t_edge[-1]*dx_edge[-1]) 
-        #J[-1] = 0.5*phi[-1]-Pr
-    elif right_bc == 1:    
+        J[-1] = (
+            (phi[-2] - phi[-1]) / (3 * Sigma_t_edge[-1] * dx_edge[-1])
+            + q1[-1] / Sigma_t_edge[-1]
+            + (F[-1] - F[-2]) / (Sigma_t_edge[-1] * dx_edge[-1])
+        )
+        # J[-1] = 0.5*phi[-1]-Pr
+    elif right_bc == 1:
         J[-1] = 0
     for i in range(1, Nx):
-        J[i] = (phi[i]-phi[i+1])/(3*Sigma_t_edge[i]*dx_edge[i]) + q1[i]/Sigma_t_edge[i] + (F[i+1]-F[i])/(Sigma_t_edge[i]*dx_edge[i]) 
+        J[i] = (
+            (phi[i] - phi[i + 1]) / (3 * Sigma_t_edge[i] * dx_edge[i])
+            + q1[i] / Sigma_t_edge[i]
+            + (F[i + 1] - F[i]) / (Sigma_t_edge[i] * dx_edge[i])
+        )
 
+    res_balance = (
+        J[1:] - J[:-1] + dx * ((Sigma_t - Sigma_s - nu * Sigma_f) * phi[1:-1] - q0)
+    )
+    res_sm = (
+        (1 / 3) * (phi[1:] - phi[:-1])
+        + Sigma_t_edge * dx_edge * J
+        - q1 * dx_edge
+        + F[:-1]
+        - F[1:]
+    )
+    res_lb = J[0] + 0.5 * phi[0] - Pl
+    res_rb = J[-1] - 0.5 * phi[-1] + Pr
 
-    res_balance = J[1:] - J[:-1] + dx *((Sigma_t-Sigma_s-nu*Sigma_f)*phi[1:-1] - q0)
-    res_sm = (1/3)*(phi[1:]-phi[:-1]) + Sigma_t_edge*dx_edge*J-q1*dx_edge+F[:-1]-F[1:]
-    res_lb = J[0] + 0.5*phi[0] - Pl
-    res_rb = J[-1] - 0.5*phi[-1] + Pr
-
-    residual = [res_balance,res_sm,res_lb,res_rb]
-    new_state = State(phi,J)
+    residual = [res_balance, res_sm, res_lb, res_rb]
+    new_state = State(phi, J)
     new_state.residual = residual
     new_state.F = F
     new_state.Pl = Pl
@@ -4150,27 +4246,26 @@ def losm_timestep(current_state, previous_state, problem):
 
 ## Tri Diagonal Matrix Algorithm(a.k.a Thomas algorithm) solver
 def tdma(a, b, c, d):
-    '''
+    """
     TDMA solver, a b c d can be NumPy array type or Python list type.
     refer to http://en.wikipedia.org/wiki/Tridiagonal_matrix_algorithm
     and to http://www.cfd-online.com/Wiki/Tridiagonal_matrix_algorithm_-_TDMA_(Thomas_algorithm)
-    '''
-    nf = len(d) # number of equations
-    ac, bc, cc, dc = map(np.array, (a, b, c, d)) # copy arrays
+    """
+    nf = len(d)  # number of equations
+    ac, bc, cc, dc = map(np.array, (a, b, c, d))  # copy arrays
     for it in range(1, nf):
-        mc = ac[it-1]/bc[it-1]
-        bc[it] = bc[it] - mc*cc[it-1] 
-        dc[it] = dc[it] - mc*dc[it-1]
-        	    
-    xc = bc
-    xc[-1] = dc[-1]/bc[-1]
+        mc = ac[it - 1] / bc[it - 1]
+        bc[it] = bc[it] - mc * cc[it - 1]
+        dc[it] = dc[it] - mc * dc[it - 1]
 
-    for il in range(nf-2, -1, -1):
-        xc[il] = (dc[il]-cc[il]*xc[il+1])/bc[il]
+    xc = bc
+    xc[-1] = dc[-1] / bc[-1]
+
+    for il in range(nf - 2, -1, -1):
+        xc[il] = (dc[il] - cc[il] * xc[il + 1]) / bc[il]
 
     return xc
 
-                   
 
 # ==============================================================================
 # Quasi Monte Carlo
