@@ -3493,29 +3493,27 @@ def weight_window(P, prog):
         # Get indices
         t, x, y, z, outside = mesh_get_index(P, mcdc["technique"]["ww"]["mesh"])
 
-        # Set target weight
+        # Get parameters
         epsilon = mcdc["technique"]["ww"]["epsilon"]
-
-        # My method
-        # w_target = (mcdc["technique"]["ww"][t, x, y, z])*(1-epsilon)+epsilon
-
-        # Wollaber Modification
-        epsi = 1e-4
-        window = mcdc["technique"]["ww"]["center"][t, x, y, z] * (1 - epsi) + epsi
-        w_min = 0.01  # np.min(window[window!=0])
-
-        w_target = (window) * (
-            1 + (1 / epsilon - 1) * np.exp(-(window - w_min) / epsilon)
-        )
-
-        # Window width
         width = mcdc["technique"]["ww"]["width"]
+        center = mcdc["technique"]["ww"]["center"][t, x, y, z]
+
+        if epsilon[WW_MIN] > 0:
+            # Adjust centers by epsilon
+            eps = epsilon[WW_MIN]
+            center = center * (1 - eps) + eps
+
+        if epsilon[WW_WOLLABER] > 0:
+            # Adjust centers by epsilon
+            eps = epsilon[WW_WOLLABER]
+            w_min = epsilon[WW_WOLLABER + 1]
+            center = (center) * (1 + (1 / eps - 1) * np.exp(-(center - w_min) / eps))
 
         # upper limit
-        ulimit = w_target * width
+        ulimit = center * width
 
         # lower limit
-        llimit = w_target / width
+        llimit = center / width
 
         # If above target
         if P["w"] > ulimit:
@@ -3534,6 +3532,7 @@ def weight_window(P, prog):
         elif P["w"] < llimit:
 
             # Russian roulette
+            # Survival weight
             w_survival = 1.1 * llimit
 
             xi = rng(P)
