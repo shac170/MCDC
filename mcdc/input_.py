@@ -1388,7 +1388,7 @@ def weight_window(
     method_checked = check_support(
         "Weight window method",
         method,
-        ["user", "previous", "alpha"],
+        ["user", "previous", "alpha","hybrid"],
     )
     if method_checked == "user":
         card["ww"]["auto"] = WW_USER
@@ -1396,7 +1396,8 @@ def weight_window(
         card["ww"]["auto"] = WW_PREVIOUS
     elif method_checked == "alpha":
         card["ww"]["auto"] = WW_ALPHA
-
+    elif method_checked == "hybrid":
+        card["ww"]["auto"] = WW_HYBRID
     # Checking techniques
     for tech in techniques:
         tech_checked = check_support(
@@ -1451,7 +1452,11 @@ def weight_window(
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
     card["ww"]["center"] = window
+    if card["ww"]["auto"] == WW_HYBRID:
+        card["hybrid"] = True
+        card["deterministic"]["mesh"] = card["ww"]["mesh"]
 
+    card["ww"]["center"] = window
     return card
 
 

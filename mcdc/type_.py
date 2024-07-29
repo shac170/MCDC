@@ -994,6 +994,27 @@ def make_type_technique(input_deck):
     struct += [("wr_threshold", float64), ("wr_survive", float64)]
 
     # =========================================================================
+    # Hybrid techniques
+    # =========================================================================
+    hybrid_list = []
+    # Mesh for deterministic material idx
+    if card["hybrid"]:
+        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi = make_type_mesh_(
+            card["deterministic"]["mesh"]
+        )
+        Ng = G
+        N_dim = 6  # group, x, y, z, mu, phi
+    else:
+        Nx = Ny = Nz = Nt = Nmu = N_azi = N_particle = Ng = N_dim = 0
+
+    hybrid_list += [("material_idx", int64, (Nt, Nx, Ny, Nz))]
+    hybrid_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
+    hybrid_list += [("mesh", mesh)]
+    hybrid_list += [("flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
+    struct += [("deterministic", into_dtype(hybrid_list))]
+
+    # =========================================================================
     # Quasi Monte Carlo
     # =========================================================================
     iqmc_list = []
