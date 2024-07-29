@@ -682,6 +682,10 @@ def prepare():
                 score_type = SCORE_SM_YZ
             elif score_name == "sm-zz":
                 score_type = SCORE_SM_ZZ
+            elif score_name == "tracklength":
+                score_type = SCORE_TRACKLENGTH
+            elif score_name == "particle-density":
+                score_type = SCORE_PARTICLE_DENSITY
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -1415,6 +1419,10 @@ def generate_hdf5(data, mcdc):
                         score_name = "sm-yz"
                     elif score_type == SCORE_SM_ZZ:
                         score_name = "sm-zz"
+                    elif score_type == SCORE_TRACKLENGTH:
+                        score_name = "tracklength"
+                    elif score_type == SCORE_PARTICLE_DENSITY:
+                        score_name = "particle-density"
 
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
