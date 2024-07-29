@@ -2182,6 +2182,10 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
             score = flux * P["uy"] * P["uz"]
         elif score_type == SCORE_SM_ZZ:
             score = flux * P["uz"] * P["uz"]
+        elif score_type == SCORE_TRACKLENGTH:
+            score = distance
+        elif score_type == SCORE_PARTICLE_DENSITY:
+            score = 1
 
         tally_bin[TALLY_SCORE, idx + i] += score
 
