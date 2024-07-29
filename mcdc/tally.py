@@ -101,13 +101,15 @@ def mesh_tally(
             [
                 "flux",
                 "total",
-                "fission",
                 "sm-xx",
                 "sm-xy",
                 "sm-xz",
                 "sm-yy",
                 "sm-yz",
                 "sm-zz",
+                "fission",
+                "tracklength",
+                "particle-density",
             ],
         )
         card.scores.append(score_checked)
@@ -204,6 +206,7 @@ def edge_tally(
             [
                 "flux",
                 "net-current",
+                "fission",
                 "sm-xx",
                 "sm-xy",
                 "sm-xz",

@@ -516,7 +516,15 @@ def step_particle(P, data, prog):
 
     # Surface crossing
     if event & EVENT_SURFACE:
+        dir = np.copy(P["uz"])
+        loc = np.copy(P["z"])
         kernel.surface_crossing(P, data, prog)
+        if (
+            mcdc["surfaces"][P["surface_ID"]]["BC"] == BC_REFLECTIVE
+            and mcdc["cycle_active"]
+        ):
+            for tally in mcdc["edge_tallies"]:
+                kernel.score_edge_tally(P, tally, data, mcdc)
         if event & EVENT_DOMAIN:
             if mcdc["surfaces"][P["surface_ID"]]["BC"] == BC_NONE:
                 kernel.domain_crossing(P, mcdc)

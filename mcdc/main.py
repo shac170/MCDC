@@ -670,8 +670,18 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
-            elif score_name.split("-")[0] == "sm":
-                score_type = SCORE_SECOND_MOMENT
+            elif score_name == "sm-xx":
+                score_type = SCORE_SM_XX
+            elif score_name == "sm-xy":
+                score_type = SCORE_SM_XY
+            elif score_name == "sm-xz":
+                score_type = SCORE_SM_XZ
+            elif score_name == "sm-yy":
+                score_type = SCORE_SM_YY
+            elif score_name == "sm-yz":
+                score_type = SCORE_SM_YZ
+            elif score_name == "sm-zz":
+                score_type = SCORE_SM_ZZ
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -746,8 +756,18 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
-            elif score_name.split("-")[0] == "sm":
-                score_type = SCORE_SECOND_MOMENT
+            elif score_name == "sm-xx":
+                score_type = SCORE_SM_XX
+            elif score_name == "sm-xy":
+                score_type = SCORE_SM_XY
+            elif score_name == "sm-xz":
+                score_type = SCORE_SM_XZ
+            elif score_name == "sm-yy":
+                score_type = SCORE_SM_YY
+            elif score_name == "sm-yz":
+                score_type = SCORE_SM_YZ
+            elif score_name == "sm-zz":
+                score_type = SCORE_SM_ZZ
 
             mcdc["edge_tallies"][i]["scores"][j] = score_type
 
@@ -1362,6 +1382,19 @@ def generate_hdf5(data, mcdc):
                         score_name = "total"
                     elif score_type == SCORE_FISSION:
                         score_name = "fission"
+                    elif score_type == SCORE_SM_XX:
+                        score_name = "sm-xx"
+                    elif score_type == SCORE_SM_XY:
+                        score_name = "sm-xy"
+                    elif score_type == SCORE_SM_XZ:
+                        score_name = "sm-xz"
+                    elif score_type == SCORE_SM_YY:
+                        score_name = "sm-yy"
+                    elif score_type == SCORE_SM_YZ:
+                        score_name = "sm-yz"
+                    elif score_type == SCORE_SM_ZZ:
+                        score_name = "sm-zz"
+
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
                     mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
@@ -1415,17 +1448,15 @@ def generate_hdf5(data, mcdc):
 
                 cell_vol = np.ones((Nt, Nx, Ny, Nz))
                 for it in range(Nt):
-                    for ix in range(Nx - 1):
-                        for iy in range(Ny - 1):
-                            for iz in range(Nz - 1):
+                    for ix in range(Nx):
+                        for iy in range(Ny):
+                            for iz in range(Nz):
                                 if Nt > 1:
                                     cell_vol[it, ix, iy, iz] *= (
                                         mesh["t"][it + 1] - mesh["t"][it]
                                     )
-
                 cell_vol = np.squeeze(cell_vol)
-                print(cell_vol)
-                input()
+
                 # Reshape tally
                 N_bin = tally["N_bin"]
                 start = tally["stride"]["tally"]
@@ -1443,6 +1474,18 @@ def generate_hdf5(data, mcdc):
                         score_name = "flux"
                     elif score_type == SCORE_NET_CURRENT:
                         score_name = "net-current"
+                    elif score_type == SCORE_SM_XX:
+                        score_name = "sm-xx"
+                    elif score_type == SCORE_SM_XY:
+                        score_name = "sm-xy"
+                    elif score_type == SCORE_SM_XZ:
+                        score_name = "sm-xz"
+                    elif score_type == SCORE_SM_YY:
+                        score_name = "sm-yy"
+                    elif score_type == SCORE_SM_YZ:
+                        score_name = "sm-yz"
+                    elif score_type == SCORE_SM_ZZ:
+                        score_name = "sm-zz"
                     group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
 
                     mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
@@ -1501,26 +1544,33 @@ def generate_hdf5(data, mcdc):
 
             # weight windows
             if mcdc["technique"]["weight_window"]:
-                # dump iQMC mesh
                 T = mcdc["technique"]
                 f.create_dataset("ww/grid/t", data=T["ww"]["mesh"]["t"])
                 f.create_dataset("ww/grid/x", data=T["ww"]["mesh"]["x"])
                 f.create_dataset("ww/grid/y", data=T["ww"]["mesh"]["y"])
                 f.create_dataset("ww/grid/z", data=T["ww"]["mesh"]["z"])
-                f.create_dataset("ww/center", data=T["ww"]["center"])
+                f.create_dataset("ww/center", data=np.squeeze(T["ww"]["center"]))
                 f.create_dataset("ww/width", data=T["ww"]["width"])
                 f.create_dataset("ww/epsilon", data=T["ww"]["epsilon"])
                 method = mcdc["technique"]["ww"]["auto"]
                 f.create_dataset("ww/method", data=method)
                 if method == 0:
-                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                    f.create_dataset(
+                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
+                    )
                 elif method == 1:
-                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                    f.create_dataset(
+                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
+                    )
                 elif method == 2:
-                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
-                    f.create_dataset("ww/alpha", data=T["ww"]["alpha"])
+                    f.create_dataset(
+                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
+                    )
+                    f.create_dataset("ww/alpha", data=np.squeeze(T["ww"]["alpha"]))
                 elif method == 3:
-                    f.create_dataset("ww/phi_tilde", data=T["ww"]["phi_tilde"])
+                    f.create_dataset(
+                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
+                    )
                 # dump x,y,z scalar flux across all groups
 
             # Eigenvalues

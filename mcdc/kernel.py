@@ -2170,8 +2170,19 @@ def score_mesh_tally(P, distance, tally, data, mcdc):
         elif score_type == SCORE_FISSION:
             SigmaF = get_MacroXS(XS_FISSION, material, P, mcdc)
             score = flux * SigmaF
-        elif score_type == SCORE_SECOND_MOMENT:
-            score = flux * mu * mu
+        elif score_type == SCORE_SM_XX:
+            score = flux * P["ux"] * P["ux"]
+        elif score_type == SCORE_SM_XY:
+            score = flux * P["ux"] * P["uy"]
+        elif score_type == SCORE_SM_XZ:
+            score = flux * P["ux"] * P["uz"]
+        elif score_type == SCORE_SM_YY:
+            score = flux * P["uy"] * P["uy"]
+        elif score_type == SCORE_SM_YZ:
+            score = flux * P["uy"] * P["uz"]
+        elif score_type == SCORE_SM_ZZ:
+            score = flux * P["uz"] * P["uz"]
+
         tally_bin[TALLY_SCORE, idx + i] += score
 
 
@@ -2189,23 +2200,25 @@ def score_edge_tally(P, tally, data, mcdc):
     shift_particle(P, SHIFT)
 
     if len(directions) == 0:
+        it = binary_search(P["t"], mesh["t"])
         if abs(P["x"] - mesh["x"][0]) < 1 / INF:
             mu = P["ux"]
         elif abs(P["x"] - mesh["x"][-1]) < 1 / INF:
             mu = P["ux"]
-            ix += 1
+            ix = len(mesh["x"])
         elif abs(P["y"] - mesh["y"][0]) < 1 / INF:
             mu = P["uy"]
         elif abs(P["y"] - mesh["y"][-1]) < 1 / INF:
             mu = P["uy"]
-            iy += 1
+            iy = len(mesh["y"])
         elif abs(P["z"] - mesh["z"][0]) < 1 / INF:
             mu = P["uz"]
         elif abs(P["z"] - mesh["z"][-1]) < 1 / INF:
             mu = P["uz"]
-            iz += 1
+            iz = len(mesh["z"])
         else:
             return
+
     elif len(directions) == 2:
         print("double crossing")
         return
@@ -2222,7 +2235,6 @@ def score_edge_tally(P, tally, data, mcdc):
             if P["uz"] > 0:
                 iz += 1
             mu = P["uz"]
-
     g, outside_energy = mesh_get_energy_index(P, mesh, mcdc["setting"]["mode_MG"])
 
     # Outside grid?
@@ -2230,7 +2242,6 @@ def score_edge_tally(P, tally, data, mcdc):
         return
 
     flux = P["w"] / abs(mu)
-
     # The tally index
     idx = (
         stride["tally"]
@@ -2247,8 +2258,18 @@ def score_edge_tally(P, tally, data, mcdc):
             score = flux
         elif score_type == SCORE_NET_CURRENT:
             score = flux * mu
-        elif score_type == SCORE_SECOND_MOMENT:
-            score = flux * mu * mu
+        elif score_type == SCORE_SM_XX:
+            score = flux * P["ux"] * P["ux"]
+        elif score_type == SCORE_SM_XY:
+            score = flux * P["ux"] * P["uy"]
+        elif score_type == SCORE_SM_XZ:
+            score = flux * P["ux"] * P["uz"]
+        elif score_type == SCORE_SM_YY:
+            score = flux * P["uy"] * P["uy"]
+        elif score_type == SCORE_SM_YZ:
+            score = flux * P["uy"] * P["uz"]
+        elif score_type == SCORE_SM_ZZ:
+            score = flux * P["uz"] * P["uz"]
 
         tally_bin[TALLY_SCORE, idx + i] += score
 
@@ -3665,16 +3686,12 @@ def ww_auto(data, mcdc, dump=True):
 
     # Previous timestep weight windows
     elif method == WW_PREVIOUS:
-        mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = flux / np.max(flux)
-        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = flux
+        mcdc["technique"]["ww"]["center"][idx_n0] = flux / np.max(flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0] = flux
 
     # Alpha approximation weight windows
     elif method == WW_ALPHA:
         old_flux = get_flux(idx_n2, mcdc, data)
-        old_flux = old_flux * norm_factor
-    elif method == 2:
-        old_flux = get_flux(idx_n2, mcdc, data)
-        # Normalizing tallies
         old_flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
 
         alpha = np.ones_like(flux)
@@ -3683,9 +3700,9 @@ def ww_auto(data, mcdc, dump=True):
         alpha /= dt
 
         new_flux = flux * np.exp(alpha * dt)
-        mcdc["technique"]["ww"]["center"][idx_n0, :, 0, 0] = new_flux / np.max(new_flux)
-        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, :, 0, 0] = new_flux
-        mcdc["technique"]["ww"]["alpha"][idx_n0, :, 0, 0] = alpha
+        mcdc["technique"]["ww"]["center"][idx_n0] = new_flux / np.max(new_flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0] = new_flux
+        mcdc["technique"]["ww"]["alpha"][idx_n0] = alpha
 
 
 # ==============================================================================
