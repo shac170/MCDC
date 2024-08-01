@@ -7,7 +7,7 @@ from mpi4py import MPI
 from mpi4py.util.dtlib import from_numpy_dtype
 
 from mcdc.print_ import print_error
-
+from mcdc.constant import *
 
 # ==============================================================================
 # Basic types
@@ -931,6 +931,7 @@ def make_type_technique(input_deck):
         ("implicit_capture", bool_),
         ("population_control", bool_),
         ("weight_window", bool_),
+        ("hybrid", bool_),
         ("weight_roulette", bool_),
         ("iQMC", bool_),
         ("IC_generator", bool_),
@@ -979,10 +980,26 @@ def make_type_technique(input_deck):
     ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
-    ww_list += [("epsilon", float64, (3,))]
+    ww_list += [("epsilon", float64, (5,))]
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
-    ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
-    ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
+    if card["weight_window"]:
+        if card["ww"]["auto"] == WW_PREVIOUS:
+            ww_list += [("phi_previous", float64, (Nt, Nx, Ny, Nz))]
+        elif card["ww"]["auto"] == WW_ALPHA:
+            ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
+            ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
+            ww_list += [("phi_previous", float64, (Nt, Nx, Ny, Nz))]
+            ww_list += [("phi_old", float64, (Nt, Nx, Ny, Nz))]
+            if card["ww"]["epsilon"][WW_LIMIT_GAMMA] > 0:
+                ww_list += [("gamma", float64, (Nt, Nx, Ny, Nz))]
+        elif card["ww"]["auto"] == WW_HYBRID:
+            ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
+        elif card["ww"]["auto"] == WW_LEAKAGE:
+            ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
+            ww_list += [("current", float64, (Nt, Nx+1, Ny+1, Nz+1))]
+            ww_list += [("phi_previous", float64, (Nt, Nx, Ny, Nz))]
+            ww_list += [("gamma", float64, (Nt, Nx, Ny, Nz))]
+            ww_list += [("Q", float64, (Nt, Nx, Ny, Nz))]
 
     struct += [("ww", into_dtype(ww_list))]
 
@@ -1011,6 +1028,9 @@ def make_type_technique(input_deck):
     hybrid_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
     hybrid_list += [("mesh", mesh)]
     hybrid_list += [("flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("ic_flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("ic_current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
+    hybrid_list += [("sm_factor", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
     hybrid_list += [("current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
     struct += [("deterministic", into_dtype(hybrid_list))]
 

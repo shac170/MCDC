@@ -132,7 +132,6 @@ def run():
     print_msg(" Now running TNT...")
     if mcdc["setting"]["mode_eigenvalue"]:
         print_header_eigenvalue(mcdc)
-
     # Run simulation
     simulation_start = MPI.Wtime()
     if mcdc["technique"]["iQMC"]:
@@ -598,6 +597,7 @@ def prepare():
             i
         ].universe_IDs
 
+
     # =========================================================================
     # Source
     # =========================================================================
@@ -628,12 +628,31 @@ def prepare():
             normalization_factor += dx * dy * dz * dt * source["prob"]
     mcdc["technique"]["integrated_source"] = normalization_factor
 
+    # =========================================================================
+    # Hybrid techniques
+    # =========================================================================
+    # WW mesh
+    if input_deck.technique["hybrid"]:
+        mcdc["technique"]["hybrid"] = True
+        for name in type_.mesh_names[:-1]:
+            copy_field(
+                mcdc["technique"]["deterministic"]["mesh"],
+                input_deck.technique["deterministic"]["mesh"],
+                name,
+            )
+
+        kernel.hybrid_preprocess(mcdc)
+
+
     # Normalize source probabilities
     tot = 1e-16
     for S in mcdc["sources"]:
         tot += S["prob"]
     for S in mcdc["sources"]:
         S["prob"] /= tot
+
+
+   
 
     # =========================================================================
     # Tally
@@ -1304,6 +1323,7 @@ def generate_hdf5(data, mcdc):
                 )
             # Store deterministic problem
             if mcdc["technique"]["hybrid"]:
+
                 det = mcdc["technique"]["deterministic"]
                 f.create_dataset(
                     "input_deck/deterministic/source",
@@ -1322,10 +1342,22 @@ def generate_hdf5(data, mcdc):
                     data=np.squeeze(det["current"]),
                 )
                 f.create_dataset(
+                    "input_deck/deterministic/sm_factor",
+                    data=np.squeeze(det["sm_factor"]),
+                )
+                f.create_dataset(
+                    "input_deck/deterministic/ic_flux",
+                    data=np.squeeze(det["ic_flux"]),
+                )
+                f.create_dataset(
+                    "input_deck/deterministic/ic_current",
+                    data=np.squeeze(det["ic_current"]),
+                )
+                f.create_dataset(
                     "tallies/normalization_factor",
                     data=mcdc["technique"]["integrated_source"],
                 )
-
+            integrated_source = mcdc["technique"]["integrated_source"]
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
                 if mcdc["technique"]["iQMC"]:
@@ -1583,24 +1615,25 @@ def generate_hdf5(data, mcdc):
                 f.create_dataset("ww/epsilon", data=T["ww"]["epsilon"])
                 method = mcdc["technique"]["ww"]["auto"]
                 f.create_dataset("ww/method", data=method)
-                if method == 0:
-                    f.create_dataset(
-                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
-                    )
-                elif method == 1:
-                    f.create_dataset(
-                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
-                    )
-                elif method == 2:
-                    f.create_dataset(
-                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
-                    )
+                if method == WW_PREVIOUS:
+                    f.create_dataset("ww/phi_previous", data=np.squeeze(T["ww"]["phi_previous"]))
+                elif method == WW_ALPHA:
+                    f.create_dataset("ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"]))
+                    f.create_dataset("ww/phi_previous", data=np.squeeze(T["ww"]["phi_previous"]))
+                    f.create_dataset("ww/phi_old", data=np.squeeze(T["ww"]["phi_old"]))
                     f.create_dataset("ww/alpha", data=np.squeeze(T["ww"]["alpha"]))
-                elif method == 3:
-                    f.create_dataset(
-                        "ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"])
-                    )
-                # dump x,y,z scalar flux across all groups
+                    if T["ww"]["epsilon"][WW_LIMIT_GAMMA] > 0:
+                        f.create_dataset("ww/gamma", data=np.squeeze(T["ww"]["gamma"]))
+                elif method == WW_HYBRID:
+                    f.create_dataset("ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"]))
+                elif method == WW_LEAKAGE:
+                    f.create_dataset("ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"]))
+                    f.create_dataset("ww/phi_previous", data=np.squeeze(T["ww"]["phi_previous"]))
+                    f.create_dataset("ww/current", data=np.squeeze(T["ww"]["current"]))
+                    f.create_dataset("ww/gamma", data=np.squeeze(T["ww"]["gamma"]))
+                    f.create_dataset("ww/Q", data=np.squeeze(T["ww"]["Q"]))
+
+                # dump x,y,z scalar floss all groups
 
             # Eigenvalues
             if mcdc["setting"]["mode_eigenvalue"]:

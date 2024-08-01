@@ -3670,7 +3670,7 @@ def get_current(idx, mcdc, data):
             if score_type == SCORE_NET_CURRENT:
                 mean = score_tally_bin[TALLY_SUM]
                 sdev = score_tally_bin[TALLY_SUM_SQ]
-                return mean[idx][:, 0, 0]
+                return mean[idx][0, 0, :]
 
 
 def get_state(idx, mcdc, data):
@@ -3754,7 +3754,7 @@ def get_state(idx, mcdc, data):
             elif score_type == SCORE_FLUX:
                 mean = score_tally_bin[TALLY_SUM]
                 phi_edge = mean[idx][0, 0, :]
-            elif score_type == SCORE_SECOND_MOMENT:
+            elif score_type == SCORE_SM_ZZ:
                 mean = score_tally_bin[TALLY_SUM]
                 SM_edge = mean[idx][0, 0, :]
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
@@ -3798,7 +3798,7 @@ def get_state(idx, mcdc, data):
             if score_type == SCORE_FLUX:
                 mean = score_tally_bin[TALLY_SUM]
                 phi = mean[idx][:]
-            elif score_type == SCORE_SECOND_MOMENT:
+            elif score_type == SCORE_SM_ZZ:
                 mean = score_tally_bin[TALLY_SUM]
                 SM = mean[idx][:]
 
@@ -3816,15 +3816,15 @@ def get_state(idx, mcdc, data):
     )
 
     F = np.zeros(len(phi) + 2)
-    # F[1:-1] = SM* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
-    # F[0] = SM_edge[0]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
-    # F[-1] = SM_edge[-1]* mcdc["technique"]["integrated_source"]/(dx[0] * dt * N_particle)
+    F[1:-1] = SM* mcdc["technique"]["integrated_source"]/(dz[0] * dt * N_particle)
+    F[0] = SM_edge[0]* mcdc["technique"]["integrated_source"]/(dz[0] * dt * N_particle)
+    F[-1] = SM_edge[-1]* mcdc["technique"]["integrated_source"]/(dz[0] * dt * N_particle)
 
     current = J * mcdc["technique"]["integrated_source"] / (dt * N_particle)
 
     # Creating initial condition state class
     state = State(det_flux, current)
-    state.F = F
+    state.F = (1.0/3.0)*det_flux - F
     return state, problem
 
 
@@ -3859,11 +3859,15 @@ def ww_auto(data, mcdc, dump=True):
 
     # Previous timestep weight windows
     elif method == WW_PREVIOUS:
+        if idx_n0 < 1:
+            return
         mcdc["technique"]["ww"]["center"][idx_n0] = flux / np.max(flux)
-        mcdc["technique"]["ww"]["phi_tilde"][idx_n0] = flux
+        mcdc["technique"]["ww"]["phi_previous"][idx_n0] = flux
 
     # Alpha approximation weight windows
     elif method == WW_ALPHA:
+        if idx_n0 < 2:
+            return
         old_flux = get_flux(idx_n2, mcdc, data)
         old_flux *= mcdc["technique"]["integrated_source"] / (dx * dt * N_particle)
 
@@ -3872,14 +3876,52 @@ def ww_auto(data, mcdc, dump=True):
         alpha[mask] = np.log(flux[mask] / old_flux[mask])
         alpha /= dt
 
+        if epsilon[WW_LIMIT_LEAKAGE] != 0:
+            print_error("LEAKAGE LIMITING NOT AVAILABLE YET")
+        if epsilon[WW_LIMIT_GAMMA] != 0:
+            print_error("GAMMA LIMITING NOT AVAILABLE YET")
+
         new_flux = flux * np.exp(alpha * dt)
         mcdc["technique"]["ww"]["center"][idx_n0] = new_flux / np.max(new_flux)
         mcdc["technique"]["ww"]["phi_tilde"][idx_n0] = new_flux
+        mcdc["technique"]["ww"]["phi_previous"][idx_n0] = flux
+        mcdc["technique"]["ww"]["phi_old"][idx_n0] = old_flux
         mcdc["technique"]["ww"]["alpha"][idx_n0] = alpha
+
+    elif method == WW_LEAKAGE:
+        det = mcdc["technique"]["deterministic"]
+        Sigma_c = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0, :]))
+        Sigma_s = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0, :]))
+        Sigma_f = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0, :]))
+        speed = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0, :]))
+        gamma = np.zeros(len(np.squeeze(det["material_idx"])[idx_n0, :]))
+        source = np.squeeze(det["source"])[idx_n0, :]
+        materials = mcdc["materials"]
+        for i in range(len(Sigma_c)):
+            mat_idx = np.squeeze(det["material_idx"])[idx_n0, :][i]
+            Sigma_c[i] = materials[mat_idx]["capture"][0] + materials[mat_idx]["scatter"][0]
+            Sigma_s[i] = materials[mat_idx]["scatter"][0]
+            Sigma_f[i] = materials[mat_idx]["fission"][0]
+            speed[i] = materials[mat_idx]["speed"]
+            gamma[i] = speed[i]*(Sigma_c[i]-materials[mat_idx]["nu_f"]*Sigma_f[i])
+            if gamma[i] != gamma[i]:
+                print("GAMMAERRPR")
+                input()
+        current = get_current(idx_n1,mcdc,data)
+        Q_tally = speed*(source-(current[1:]-current[:-1])/dx)
+        mask = gamma != 0
+        new_flux = np.copy(flux)
+        new_flux[mask] = flux[mask] * np.exp(-gamma[mask] * dt) + Q_tally[mask]/gamma[mask] *(1-np.exp(-gamma[mask] * dt))
+
+        mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :] = new_flux / np.max(new_flux)
+        mcdc["technique"]["ww"]["phi_tilde"][idx_n0, 0, 0, :] = new_flux
+        mcdc["technique"]["ww"]["phi_previous"][idx_n0] = flux
+        mcdc["technique"]["ww"]["current"][idx_n0] = current
+        mcdc["technique"]["ww"]["gamma"][idx_n0, 0, 0, :] = gamma
+        mcdc["technique"]["ww"]["Q"][idx_n0, 0, 0, :] = Q_tally
 
     # Hybrid weight windows
     elif method == WW_HYBRID:
-
         # Creating initial condition state class
         old_state, problem = get_state(idx_n1, mcdc, data)
         # old_state.flux = mcdc["technique"]["deterministic"]["flux"][idx_n1,0,0,:,0]
@@ -3889,16 +3931,24 @@ def ww_auto(data, mcdc, dump=True):
         new_state = losm_timestep(old_state, old_state, problem)
         new_flux = new_state.flux[1:-1]
         new_current = new_state.current[:-1]
-        print(mcdc["technique"]["deterministic"]["flux"].shape, idx_n0)
         mcdc["technique"]["deterministic"]["flux"][idx_n0, 0, 0, :, 0] = new_state.flux
         mcdc["technique"]["deterministic"]["current"][
             idx_n0, 0, 0, :, 0
         ] = new_state.current
-
+        mcdc["technique"]["deterministic"]["ic_flux"][idx_n0, 0, 0, :, 0] = old_state.flux
+        mcdc["technique"]["deterministic"]["ic_current"][idx_n0, 0, 0, :, 0] = old_state.current
+        mcdc["technique"]["deterministic"]["sm_factor"][
+            idx_n0, 0, 0, :, 0
+        ] = old_state.F
         # Assign weight windows according to new flux
         mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :] = new_flux / np.max(new_flux)
         mcdc["technique"]["ww"]["phi_tilde"][idx_n0, 0, 0, :] = new_flux
 
+
+    if np.min(mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :]) < 0:
+        print_msg("Negative Weight Window Center, renormalizing")
+        mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :] -= np.min(mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :])
+        mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :] = mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :]/np.max(mcdc["technique"]["ww"]["center"][idx_n0, 0, 0, :])
     # write_output(file, idx_n0, t, x_mid, data, method, epsilon, width)
 
 
@@ -4087,6 +4137,7 @@ def hybrid_prepare_source(mcdc):
                             in_z = source["box_z"][0] <= z <= source["box_z"][1]
                             if in_x and in_y and in_z:
                                 det["source"][:, t, i, j, k] = source["prob"]
+
 
 
 def losm_timestep(current_state, previous_state, problem):

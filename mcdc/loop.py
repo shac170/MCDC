@@ -93,7 +93,7 @@ def loop_fixed_source(data, mcdc):
                 start = MPI.Wtime()
             mcdc["idx_census"] = idx_census
             # Apply weight window
-            if mcdc["technique"]["weight_window"] and idx_census > 0:
+            if mcdc["technique"]["weight_window"]:
                 with objmode():
                     kernel.ww_auto(data, mcdc)
             seed_census = kernel.split_seed(seed_batch, SEED_SPLIT_CENSUS)

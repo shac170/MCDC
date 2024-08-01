@@ -1384,11 +1384,11 @@ def weight_window(
     # Set width
     if width is not None:
         card["ww"]["width"] = width
-
+    hybrid_needed = False
     method_checked = check_support(
         "Weight window method",
         method,
-        ["user", "previous", "alpha","hybrid"],
+        ["user", "previous", "alpha","hybrid","leakage"],
     )
     if method_checked == "user":
         card["ww"]["auto"] = WW_USER
@@ -1398,18 +1398,28 @@ def weight_window(
         card["ww"]["auto"] = WW_ALPHA
     elif method_checked == "hybrid":
         card["ww"]["auto"] = WW_HYBRID
+        hybrid_needed = True
+    elif method_checked == "leakage":
+        card["ww"]["auto"] = WW_LEAKAGE
+        hybrid_needed  = True
     # Checking techniques
     for tech in techniques:
         tech_checked = check_support(
             "Weight window technique",
             tech[0],
-            ["min-center", "wollaber"],
+            ["min-center", "wollaber","limit-gamma","limit-leakage"],
         )
         if tech_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = tech[1]
         elif tech_checked == "wollaber":
             card["ww"]["epsilon"][WW_WOLLABER] = tech[1]
             card["ww"]["epsilon"][WW_WOLLABER + 1] = tech[2]
+        elif tech_checked == "limit-gamma":
+            card["ww"]["epsilon"][WW_LIMIT_GAMMA] = 1
+            hybrid_needed = True
+        elif tech_checked == "limit-leakage":
+            card["ww"]["epsilon"][WW_LIMIT_LEAKAGE] = 1
+            hybrid_needed = True
 
     # Set mesh
     if x is not None:
@@ -1452,7 +1462,7 @@ def weight_window(
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
     card["ww"]["center"] = window
-    if card["ww"]["auto"] == WW_HYBRID:
+    if hybrid_needed:
         card["hybrid"] = True
         card["deterministic"]["mesh"] = card["ww"]["mesh"]
 
