@@ -357,6 +357,7 @@ def prepare():
     type_.make_type_source(input_deck)
     type_.make_type_mesh_tally(input_deck)
     type_.make_type_edge_tally(input_deck)
+    type_.make_type_census_tally(input_deck)
     type_.make_type_surface_tally(input_deck)
     type_.make_type_setting(input_deck)
     type_.make_type_uq(input_deck)
@@ -660,6 +661,7 @@ def prepare():
 
     N_mesh_tally = len(input_deck.mesh_tallies)
     N_edge_tally = len(input_deck.edge_tallies)
+    N_census_tally = len(input_deck.census_tallies)
     N_surface_tally = len(input_deck.surface_tallies)
     tally_size = 0
 
@@ -705,6 +707,15 @@ def prepare():
                 score_type = SCORE_TRACKLENGTH
             elif score_name == "particle-density":
                 score_type = SCORE_PARTICLE_DENSITY
+            elif score_name == "weight-density":
+                score_type = SCORE_WEIGHT_DENSITY
+            elif score_name == "current-x":
+                score_type = SCORE_CURRENT_X
+            elif score_name == "current-y":
+                score_type = SCORE_CURRENT_Y
+            elif score_name == "current-z":
+                score_type = SCORE_CURRENT_Z
+
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -840,6 +851,101 @@ def prepare():
         mcdc["edge_tallies"][i]["stride"]["tally"] = tally_size
 
         tally_size += mcdc["edge_tallies"][i]["N_bin"]
+
+    # Census tallies
+    for i in range(N_census_tally):
+        # Direct assignment
+        copy_field(mcdc["census_tallies"][i], input_deck.census_tallies[i], "N_bin")
+
+        # Filters (variables with possible different sizes)
+        for name in ["x", "y", "z", "t", "mu", "azi", "g"]:
+            N = len(getattr(input_deck.census_tallies[i], name))
+            mcdc["census_tallies"][i]["filter"][name][:N] = getattr(
+                input_deck.census_tallies[i], name
+            )
+
+        # Set tally scores
+        N_score = len(input_deck.census_tallies[i].scores)
+        mcdc["census_tallies"][i]["N_score"] = N_score
+        for j in range(N_score):
+            score_name = input_deck.census_tallies[i].scores[j]
+            score_type = None
+            if score_name == "flux":
+                score_type = SCORE_FLUX
+            elif score_name == "sm-xx":
+                score_type = SCORE_SM_XX
+            elif score_name == "sm-xy":
+                score_type = SCORE_SM_XY
+            elif score_name == "sm-xz":
+                score_type = SCORE_SM_XZ
+            elif score_name == "sm-yy":
+                score_type = SCORE_SM_YY
+            elif score_name == "sm-yz":
+                score_type = SCORE_SM_YZ
+            elif score_name == "sm-zz":
+                score_type = SCORE_SM_ZZ
+            elif score_name == "tracklength":
+                score_type = SCORE_TRACKLENGTH
+            elif score_name == "particle-density":
+                score_type = SCORE_PARTICLE_DENSITY
+            elif score_name == "weight-density":
+                score_type = SCORE_WEIGHT_DENSITY
+            elif score_name == "current-x":
+                score_type = SCORE_CURRENT_X
+            elif score_name == "current-y":
+                score_type = SCORE_CURRENT_Y
+            elif score_name == "current-z":
+                score_type = SCORE_CURRENT_Z
+
+            mcdc["census_tallies"][i]["scores"][j] = score_type
+
+        # Filter grid sizes
+        N_sensitivity = input_deck.setting["N_sensitivity"]
+        Ns = 1 + N_sensitivity
+        if input_deck.technique["dsm_order"] == 2:
+            Ns = 1 + 2 * N_sensitivity + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+        Nmu = len(input_deck.census_tallies[i].mu) - 1
+        N_azi = len(input_deck.census_tallies[i].azi) - 1
+        Ng = len(input_deck.census_tallies[i].g) - 1
+        Nx = len(input_deck.census_tallies[i].x) - 1
+        Ny = len(input_deck.census_tallies[i].y) - 1
+        Nz = len(input_deck.census_tallies[i].z) - 1
+        Nt = len(input_deck.census_tallies[i].t) - 1
+
+        # Update N_bin
+        mcdc["census_tallies"][i]["N_bin"] *= Ns * N_score
+
+        # Filter strides
+        stride = N_score
+        if Nz > 1:
+            mcdc["census_tallies"][i]["stride"]["z"] = stride
+            stride *= Nz
+        if Ny > 1:
+            mcdc["census_tallies"][i]["stride"]["y"] = stride
+            stride *= Ny
+        if Nx > 1:
+            mcdc["census_tallies"][i]["stride"]["x"] = stride
+            stride *= Nx
+        if Nt > 1:
+            mcdc["census_tallies"][i]["stride"]["t"] = stride
+            stride *= Nt
+        if Ng > 1:
+            mcdc["census_tallies"][i]["stride"]["g"] = stride
+            stride *= Ng
+        if N_azi > 1:
+            mcdc["census_tallies"][i]["stride"]["azi"] = stride
+            stride *= N_azi
+        if Nmu > 1:
+            mcdc["census_tallies"][i]["stride"]["mu"] = stride
+            stride *= Nmu
+        if Ns > 1:
+            mcdc["census_tallies"][i]["stride"]["sensitivity"] = stride
+
+        # Set tally stride and accumulate total tally size
+        mcdc["census_tallies"][i]["stride"]["tally"] = tally_size
+        tally_size += mcdc["census_tallies"][i]["N_bin"]
+
+
     # Surface tallies
     for i in range(N_surface_tally):
         # Direct assignment
@@ -997,7 +1103,9 @@ def prepare():
         mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
         mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
         mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
-
+        mcdc["technique"]["ww"]["save"] = input_deck.technique["ww"]["save"]
+        mcdc["technique"]["ww"]["N_update"] = input_deck.technique["ww"]["N_update"]
+                
     # =========================================================================
     # Weight roulette
     # =========================================================================
@@ -1352,11 +1460,15 @@ def generate_hdf5(data, mcdc):
                 f.create_dataset(
                     "input_deck/deterministic/ic_current",
                     data=np.squeeze(det["ic_current"]),
-                )
-                f.create_dataset(
-                    "tallies/normalization_factor",
-                    data=mcdc["technique"]["integrated_source"],
-                )
+            )
+            f.create_dataset(
+                "tallies/normalization_factor",
+                data=mcdc["technique"]["integrated_source"],
+            )
+            f.create_dataset(
+                "tallies/census_particles",
+                data=np.array([mcdc["census_particles"]]),
+            )
             integrated_source = mcdc["technique"]["integrated_source"]
             # Mesh tallies
             for ID, tally in enumerate(mcdc["mesh_tallies"]):
@@ -1455,7 +1567,14 @@ def generate_hdf5(data, mcdc):
                         score_name = "tracklength"
                     elif score_type == SCORE_PARTICLE_DENSITY:
                         score_name = "particle-density"
-
+                    elif score_type == SCORE_WEIGHT_DENSITY:
+                        score_name = "weight-density"
+                    elif score_type == SCORE_CURRENT_X:
+                        score_name = "current-x"
+                    elif score_type == SCORE_CURRENT_Y:
+                        score_name = "current-y"
+                    elif score_type == SCORE_CURRENT_Z:
+                        score_name = "current-z"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
                     mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
@@ -1548,7 +1667,7 @@ def generate_hdf5(data, mcdc):
                     elif score_type == SCORE_SM_ZZ:
                         score_name = "sm-zz"
                     group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
-
+        
                     mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
                     sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
 
@@ -1559,6 +1678,115 @@ def generate_hdf5(data, mcdc):
                         tot_var = score_tally_bin[TALLY_UQ_BATCH]
                         uq_var = tot_var - mc_var
                         f.create_dataset(group_name + "uq_var", data=uq_var)
+
+            # census tallies
+            for ID, tally in enumerate(mcdc["census_tallies"]):
+                if mcdc["technique"]["iQMC"]:
+                    break
+
+                mesh = tally["filter"]
+
+                f.create_dataset("tallies/census_tally_%i/grid/t" % ID, data=mesh["t"])
+                f.create_dataset("tallies/census_tally_%i/grid/x" % ID, data=mesh["x"])
+                f.create_dataset("tallies/census_tally_%i/grid/y" % ID, data=mesh["y"])
+                f.create_dataset("tallies/census_tally_%i/grid/z" % ID, data=mesh["z"])
+                f.create_dataset("tallies/census_tally_%i/grid/mu" % ID, data=mesh["mu"])
+                f.create_dataset(
+                    "tallies/census_tally_%i/grid/azi" % ID, data=mesh["azi"]
+                )
+                f.create_dataset("tallies/census_tally_%i/grid/g" % ID, data=mesh["g"])
+
+                # Shape
+                N_sensitivity = input_deck.setting["N_sensitivity"]
+                Ns = 1 + N_sensitivity
+                if input_deck.technique["dsm_order"] == 2:
+                    Ns = (
+                        1
+                        + 2 * N_sensitivity
+                        + int(0.5 * N_sensitivity * (N_sensitivity - 1))
+                    )
+                Nmu = len(mesh["mu"]) - 1
+                N_azi = len(mesh["azi"]) - 1
+                Ng = len(mesh["g"]) - 1
+                Nx = len(mesh["x"]) - 1
+                Ny = len(mesh["y"]) - 1
+                Nz = len(mesh["z"]) - 1
+                Nt = len(mesh["t"]) - 1
+                N_score = tally["N_score"]
+
+                if not mcdc["technique"]["uq"]:
+                    shape = (3, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+                else:
+                    shape = (5, Ns, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+                cell_vol = np.ones((Nt, Nx, Ny, Nz))
+                for it in range(Nt):
+                    for ix in range(Nx):
+                        for iy in range(Ny):
+                            for iz in range(Nz):
+                                if Nx > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["x"][ix + 1] - mesh["x"][ix]
+                                    )
+                                if Ny > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["y"][iy + 1] - mesh["y"][iy]
+                                    )
+                                if Nz > 1:
+                                    cell_vol[it, ix, iy, iz] *= (
+                                        mesh["z"][iz + 1] - mesh["z"][iz]
+                                    )
+                cell_vol = np.squeeze(cell_vol)
+                # Reshape tally
+                N_bin = tally["N_bin"]
+                start = tally["stride"]["tally"]
+                tally_bin = data[TALLY][:, start : start + N_bin]
+                tally_bin = tally_bin.reshape(shape)
+
+                # Roll tally so that score is in the front
+                tally_bin = np.rollaxis(tally_bin, 9, 0)
+
+                # Iterate over scores
+                for i in range(N_score):
+                    score_type = tally["scores"][i]
+                    score_tally_bin = np.squeeze(tally_bin[i])
+                    if score_type == SCORE_FLUX:
+                        score_name = "flux"
+                    elif score_type == SCORE_TOTAL:
+                        score_name = "total"
+                    elif score_type == SCORE_FISSION:
+                        score_name = "fission"
+                    elif score_type == SCORE_SM_XX:
+                        score_name = "sm-xx"
+                    elif score_type == SCORE_SM_XY:
+                        score_name = "sm-xy"
+                    elif score_type == SCORE_SM_XZ:
+                        score_name = "sm-xz"
+                    elif score_type == SCORE_SM_YY:
+                        score_name = "sm-yy"
+                    elif score_type == SCORE_SM_YZ:
+                        score_name = "sm-yz"
+                    elif score_type == SCORE_SM_ZZ:
+                        score_name = "sm-zz"
+                    elif score_type == SCORE_PARTICLE_DENSITY:
+                        score_name = "particle-density"
+                    elif score_type == SCORE_CURRENT_X:
+                        score_name = "current-x"
+                    elif score_type == SCORE_CURRENT_Y:
+                        score_name = "current-y"
+                    elif score_type == SCORE_CURRENT_Z:
+                        score_name = "current-z"
+                    group_name = "tallies/census_tally_%i/%s/" % (ID, score_name)
+
+                    mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
+                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    f.create_dataset(group_name + "mean", data=mean)
+                    f.create_dataset(group_name + "sdev", data=sdev)
+                    if mcdc["technique"]["uq"]:
+                        mc_var = score_tally_bin[TALLY_UQ_BATCH_VAR]
+                        tot_var = score_tally_bin[TALLY_UQ_BATCH]
+                        uq_var = tot_var - mc_var
+                        f.create_dataset(group_name + "uq_var", data=uq_var)
+
 
             # Surface tallies
             for ID, tally in enumerate(mcdc["surface_tallies"]):
@@ -1612,6 +1840,7 @@ def generate_hdf5(data, mcdc):
                 f.create_dataset("ww/grid/z", data=T["ww"]["mesh"]["z"])
                 f.create_dataset("ww/center", data=np.squeeze(T["ww"]["center"]))
                 f.create_dataset("ww/width", data=T["ww"]["width"])
+                f.create_dataset("ww/N_update", data=T["ww"]["N_update"])
                 f.create_dataset("ww/epsilon", data=T["ww"]["epsilon"])
                 method = mcdc["technique"]["ww"]["auto"]
                 f.create_dataset("ww/method", data=method)
@@ -1751,6 +1980,7 @@ def closeout(mcdc):
                 "simulation",
                 "output",
                 "bank_management",
+                "census"
             ]:
                 f.create_dataset(
                     "runtime/" + name, data=np.array([mcdc["runtime_" + name]])

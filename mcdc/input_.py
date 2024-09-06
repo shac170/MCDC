@@ -1351,6 +1351,8 @@ def weight_window(
     width=2.5,
     method={"user"},
     techniques={},
+    N_update = 0,
+    save_data = True,
 ):
     """
     Activate weight window variance reduction technique.
@@ -1381,9 +1383,13 @@ def weight_window(
     """
     card = global_.input_deck.technique
     card["weight_window"] = True
+    card["ww"]["N_update"] = N_update
+    card["ww"]["save"] = save_data
     # Set width
     if width is not None:
         card["ww"]["width"] = width
+
+    # Checking WW method
     hybrid_needed = False
     method_checked = check_support(
         "Weight window method",
@@ -1402,24 +1408,27 @@ def weight_window(
     elif method_checked == "leakage":
         card["ww"]["auto"] = WW_LEAKAGE
         hybrid_needed  = True
+
     # Checking techniques
     for tech in techniques:
         tech_checked = check_support(
             "Weight window technique",
             tech[0],
-            ["min-center", "wollaber","limit-gamma","limit-leakage"],
+            ["min-center", "wollaber","limit-gamma","limit-leakage","time-interpolation"],
         )
         if tech_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = tech[1]
-        elif tech_checked == "wollaber":
+        if tech_checked == "wollaber":
             card["ww"]["epsilon"][WW_WOLLABER] = tech[1]
             card["ww"]["epsilon"][WW_WOLLABER + 1] = tech[2]
-        elif tech_checked == "limit-gamma":
+        if tech_checked == "limit-gamma":
             card["ww"]["epsilon"][WW_LIMIT_GAMMA] = 1
             hybrid_needed = True
-        elif tech_checked == "limit-leakage":
+        if tech_checked == "limit-leakage":
             card["ww"]["epsilon"][WW_LIMIT_LEAKAGE] = 1
             hybrid_needed = True
+        if tech_checked == "time-interpolation":
+            card["ww"]["epsilon"][WW_IC] = tech[1]
 
     # Set mesh
     if x is not None:
@@ -1452,12 +1461,13 @@ def weight_window(
     ax_expand = []
     if t is None:
         ax_expand.append(0)
+    ax_expand.append(1)
     if x is None:
-        ax_expand.append(1)
-    if y is None:
         ax_expand.append(2)
-    if z is None:
+    if y is None:
         ax_expand.append(3)
+    if z is None:
+        ax_expand.append(4)
     window /= np.max(window)
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)

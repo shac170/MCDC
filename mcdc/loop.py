@@ -89,13 +89,8 @@ def loop_fixed_source(data, mcdc):
 
         # Loop over time censuses
         for idx_census in range(mcdc["setting"]["N_census"]):
-            with objmode(start="float64"):
-                start = MPI.Wtime()
+            start = MPI.Wtime()
             mcdc["idx_census"] = idx_census
-            # Apply weight window
-            if mcdc["technique"]["weight_window"]:
-                with objmode():
-                    kernel.ww_auto(data, mcdc)
             seed_census = kernel.split_seed(seed_batch, SEED_SPLIT_CENSUS)
 
             # Loop over source particles
@@ -109,6 +104,7 @@ def loop_fixed_source(data, mcdc):
                 )
                 loop_source_precursor(seed_source_precursor, data, mcdc)
 
+            mcdc["census_particles"][idx_census] = kernel.get_bank_size(mcdc["bank_census"])
             # Time census closeout
             if idx_census < mcdc["setting"]["N_census"] - 1:
                 # TODO: Output tally (optional)
@@ -116,8 +112,7 @@ def loop_fixed_source(data, mcdc):
                 # Manage particle banks: population control and work rebalance
                 seed_bank = kernel.split_seed(seed_census, SEED_SPLIT_BANK)
                 kernel.manage_particle_banks(seed_bank, mcdc)
-            with objmode():
-                mcdc["runtime_census"][idx_census] = MPI.Wtime() - start
+            mcdc["runtime_census"][idx_census] = MPI.Wtime() - start
 
         # Multi-batch closeout
         if mcdc["setting"]["N_batch"] > 1:
@@ -331,7 +326,7 @@ def source_dd_resolution(data, prog):
             kernel.dd_check_out(mcdc)
             terminated = True
 
-
+import os 
 @njit
 def loop_source(seed, data, mcdc):
     # Progress bar indicator
@@ -344,9 +339,18 @@ def loop_source(seed, data, mcdc):
     work_start = mcdc["mpi_work_start"]
     work_size = mcdc["mpi_work_size"]
     work_end = work_start + work_size
-
+    if mcdc["technique"]["weight_window"]:
+        split = int(mcdc["technique"]["ww"]["N_update"])
+        idx_split = int(work_size/(mcdc["technique"]["ww"]["N_update"]+1))
+        ww_stop = []
+        for si in range(0,split+1):
+            ww_stop.append(idx_split*si)
+    mcdc["technique"]["ww"]["idx_update"] = 0
     for idx_work in range(work_size):
-
+        if mcdc["technique"]["weight_window"]:
+            if idx_work in ww_stop:
+                kernel.ww_update(data,mcdc)
+                mcdc["technique"]["ww"]["idx_update"] += 1
         # =====================================================================
         # Generate a source particle
         # =====================================================================
@@ -364,6 +368,12 @@ def loop_source(seed, data, mcdc):
         # =====================================================================
 
         source_closeout(mcdc, idx_work, N_prog, data)
+
+       
+        # =====================================================================
+        # Check for weight window update
+        # =====================================================================
+
 
     if mcdc["technique"]["domain_decomposition"]:
         source_dd_resolution(data, mcdc)
@@ -460,7 +470,8 @@ def loop_particle(P, data, prog):
 
     while P["alive"]:
         step_particle(P, data, prog)
-
+    if P["w"] > 1:
+        print("Large weight",P["w"],P["y"],P["z"])
     # Particle tracker
     if mcdc["setting"]["track_particle"]:
         kernel.track_particle(P, mcdc)
@@ -542,6 +553,8 @@ def step_particle(P, data, prog):
 
     # Census time crossing
     if event & EVENT_CENSUS:
+        for tally in mcdc["census_tallies"]:
+            kernel.score_census_tally(P, tally, data, mcdc)
         P["t"] += SHIFT
         adapt.add_census(P, prog)
         P["alive"] = False

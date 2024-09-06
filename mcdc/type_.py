@@ -732,6 +732,64 @@ def make_type_mesh_tally(input_deck):
     # Make tally structure
     mesh_tally = into_dtype(struct)
 
+def make_type_census_tally(input_deck):
+    global census_tally
+    struct = []
+
+    # Maximum numbers of mesh and filter grids and scores
+    Nmax_x = 2
+    Nmax_y = 2
+    Nmax_z = 2
+    Nmax_t = 2
+    Nmax_mu = 2
+    Nmax_azi = 2
+    Nmax_g = 2
+    Nmax_score = 1
+    for card in input_deck.census_tallies:
+        Nmax_x = max(Nmax_x, len(card.x))
+        Nmax_y = max(Nmax_y, len(card.y))
+        Nmax_z = max(Nmax_z, len(card.z))
+        Nmax_t = max(Nmax_t, len(card.t))
+        Nmax_mu = max(Nmax_mu, len(card.mu))
+        Nmax_azi = max(Nmax_azi, len(card.azi))
+        Nmax_g = max(Nmax_g, len(card.g))
+        Nmax_score = max(Nmax_score, len(card.scores))
+
+    # Set the filter
+    filter_ = [
+        ("x", float64, (Nmax_x,)),
+        ("y", float64, (Nmax_y,)),
+        ("z", float64, (Nmax_z,)),
+        ("t", float64, (Nmax_t,)),
+        ("mu", float64, (Nmax_mu,)),
+        ("azi", float64, (Nmax_azi,)),
+        ("g", float64, (Nmax_g,)),
+    ]
+    struct += [("filter", filter_)]
+
+    # Tally strides
+    stride = [
+        ("tally", int64),
+        ("sensitivity", int64),
+        ("mu", int64),
+        ("azi", int64),
+        ("g", int64),
+        ("t", int64),
+        ("x", int64),
+        ("y", int64),
+        ("z", int64),
+    ]
+    struct += [("stride", stride)]
+
+    # Total number of bins
+    struct += [("N_bin", int64)]
+
+    # Scores
+    struct += [("N_score", int64), ("scores", int64, (Nmax_score,))]
+
+    # Make tally structure
+    census_tally = into_dtype(struct)
+
 
 def make_type_edge_tally(input_deck):
     global edge_tally
@@ -977,29 +1035,34 @@ def make_type_technique(input_deck):
 
     # Mesh
     mesh, Nx, Ny, Nz, Nt, Nmu, N_azi, Ng = make_type_mesh(card["ww"]["mesh"])
+    N_update = card["ww"]["N_update"]+1
     ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
-    ww_list += [("epsilon", float64, (5,))]
-    ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
+    ww_list += [("epsilon", float64, (6,))]
+    ww_list += [("center", float64, (Nt, N_update, Nx, Ny, Nz))]
+    ww_list += [("N_update", float64)]    
+    ww_list += [("save", bool_)]
+    ww_list += [("idx_update", int64)]
     if card["weight_window"]:
-        if card["ww"]["auto"] == WW_PREVIOUS:
-            ww_list += [("phi_previous", float64, (Nt, Nx, Ny, Nz))]
-        elif card["ww"]["auto"] == WW_ALPHA:
-            ww_list += [("alpha", float64, (Nt, Nx, Ny, Nz))]
-            ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
-            ww_list += [("phi_previous", float64, (Nt, Nx, Ny, Nz))]
-            ww_list += [("phi_old", float64, (Nt, Nx, Ny, Nz))]
-            if card["ww"]["epsilon"][WW_LIMIT_GAMMA] > 0:
-                ww_list += [("gamma", float64, (Nt, Nx, Ny, Nz))]
-        elif card["ww"]["auto"] == WW_HYBRID:
-            ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
-        elif card["ww"]["auto"] == WW_LEAKAGE:
-            ww_list += [("phi_tilde", float64, (Nt, Nx, Ny, Nz))]
-            ww_list += [("current", float64, (Nt, Nx+1, Ny+1, Nz+1))]
-            ww_list += [("phi_previous", float64, (Nt, Nx, Ny, Nz))]
-            ww_list += [("gamma", float64, (Nt, Nx, Ny, Nz))]
-            ww_list += [("Q", float64, (Nt, Nx, Ny, Nz))]
+        if card["ww"]["save"]:
+            if card["ww"]["auto"] == WW_PREVIOUS:
+                ww_list += [("phi_previous", float64, (Nt, N_update, Nx, Ny, Nz))]
+            elif card["ww"]["auto"] == WW_ALPHA:
+                ww_list += [("alpha", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("phi_tilde", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("phi_previous", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("phi_old", float64, (Nt, N_update, Nx, Ny, Nz))]
+                if card["ww"]["epsilon"][WW_LIMIT_GAMMA] > 0:
+                    ww_list += [("gamma", float64, (Nt, N_update, Nx, Ny, Nz))]
+            elif card["ww"]["auto"] == WW_HYBRID:
+                ww_list += [("phi_tilde", float64, (Nt, N_update, Nx, Ny, Nz))]
+            elif card["ww"]["auto"] == WW_LEAKAGE:
+                ww_list += [("phi_tilde", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("current", float64, (Nt, N_update, Nx+1, Ny+1, Nz+1))]
+                ww_list += [("phi_previous", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("gamma", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("Q", float64, (Nt, N_update, Nx, Ny, Nz))]
 
     struct += [("ww", into_dtype(ww_list))]
 
@@ -1023,15 +1086,15 @@ def make_type_technique(input_deck):
         N_dim = 6  # group, x, y, z, mu, phi
     else:
         Nx = Ny = Nz = Nt = Nmu = N_azi = N_particle = Ng = N_dim = 0
-
+    N_update = card["ww"]["N_update"]+1
     hybrid_list += [("material_idx", int64, (Nt, Nx, Ny, Nz))]
     hybrid_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
     hybrid_list += [("mesh", mesh)]
-    hybrid_list += [("flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
-    hybrid_list += [("ic_flux", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
-    hybrid_list += [("ic_current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
-    hybrid_list += [("sm_factor", float64, (Nt, Nx, Ny, Nz + 2, Ng))]
-    hybrid_list += [("current", float64, (Nt, Nx, Ny, Nz + 1, Ng))]
+    hybrid_list += [("flux", float64, (Nt,N_update, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("ic_flux", float64, (Nt,N_update, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("ic_current", float64, (Nt,N_update, Nx, Ny, Nz + 1, Ng))]
+    hybrid_list += [("sm_factor", float64, (Nt,N_update, Nx, Ny, Nz + 2, Ng))]
+    hybrid_list += [("current", float64, (Nt,N_update, Nx, Ny, Nz + 1, Ng))]
     struct += [("deterministic", into_dtype(hybrid_list))]
 
     # =========================================================================
@@ -1337,6 +1400,7 @@ def make_type_global(input_deck):
     N_lattice = len(input_deck.lattices)
     N_mesh_tally = len(input_deck.mesh_tallies)
     N_edge_tally = len(input_deck.edge_tallies)
+    N_census_tally = len(input_deck.census_tallies)
     N_surface_tally = len(input_deck.surface_tallies)
 
     # Simulation parameters
@@ -1405,6 +1469,7 @@ def make_type_global(input_deck):
             ("sources", source, (N_source,)),
             ("mesh_tallies", mesh_tally, (N_mesh_tally,)),
             ("edge_tallies", edge_tally, (N_edge_tally,)),
+            ("census_tallies", census_tally, (N_census_tally,)),
             ("surface_tallies", surface_tally, (N_surface_tally,)),
             ("setting", setting),
             ("technique", technique),
