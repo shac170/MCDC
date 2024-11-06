@@ -320,6 +320,7 @@ def census_tally(
                 "sm-yz",
                 "sm-zz",
                 "particle-density",
+                "weight-density",
                 "current-x",
                 "current-y",
                 "current-z",

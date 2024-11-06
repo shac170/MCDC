@@ -106,12 +106,23 @@ def loop_fixed_source(data, mcdc):
 
             mcdc["census_particles"][idx_census] = kernel.get_bank_size(mcdc["bank_census"])
             # Time census closeout
+
+            t_set = []
+            for P in mcdc["bank_census"]["particles"][:kernel.get_bank_size(mcdc["bank_census"])]:
+                if P["t"] not in t_set:
+                    t_set.append(P["t"])
+                for tally in mcdc["census_tallies"]:
+                    kernel.score_census_tally(P, tally, data, mcdc)
+                kernel.tally_accumulate(data, mcdc)
+
+
             if idx_census < mcdc["setting"]["N_census"] - 1:
                 # TODO: Output tally (optional)
 
                 # Manage particle banks: population control and work rebalance
                 seed_bank = kernel.split_seed(seed_census, SEED_SPLIT_BANK)
                 kernel.manage_particle_banks(seed_bank, mcdc)
+            
             mcdc["runtime_census"][idx_census] = MPI.Wtime() - start
 
         # Multi-batch closeout
@@ -470,8 +481,6 @@ def loop_particle(P, data, prog):
 
     while P["alive"]:
         step_particle(P, data, prog)
-    if P["w"] > 1:
-        print("Large weight",P["w"],P["y"],P["z"])
     # Particle tracker
     if mcdc["setting"]["track_particle"]:
         kernel.track_particle(P, mcdc)
@@ -553,8 +562,6 @@ def step_particle(P, data, prog):
 
     # Census time crossing
     if event & EVENT_CENSUS:
-        for tally in mcdc["census_tallies"]:
-            kernel.score_census_tally(P, tally, data, mcdc)
         P["t"] += SHIFT
         adapt.add_census(P, prog)
         P["alive"] = False

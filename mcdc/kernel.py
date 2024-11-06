@@ -2286,9 +2286,9 @@ def score_edge_tally(P, tally, data, mcdc):
         tally_bin[TALLY_SCORE, idx + i] += score
 
 
-def score_census_tally(P, tally, data, mcdc):
+def score_census_tally(P_rec, tally, data, mcdc):
+    P = recordlike_to_particle(P_rec)
     tally_bin = data[TALLY]
-    material = mcdc["materials"][P["material_ID"]]
     mesh = tally["filter"]
     stride = tally["stride"]
     # Get indices
@@ -2315,17 +2315,12 @@ def score_census_tally(P, tally, data, mcdc):
     )
 
     # Score
-    flux = P["w"]
+    speed = get_particle_speed(P, mcdc)
+    flux = P["w"]*speed
     for i in range(tally["N_score"]):
         score_type = tally["scores"][i]
         if score_type == SCORE_FLUX:
             score = flux
-        elif score_type == SCORE_TOTAL:
-            SigmaT = get_MacroXS(XS_TOTAL, material, P, mcdc)
-            score = flux * SigmaT
-        elif score_type == SCORE_FISSION:
-            SigmaF = get_MacroXS(XS_FISSION, material, P, mcdc)
-            score = flux * SigmaF
         elif score_type == SCORE_SM_XX:
             score = flux * P["ux"] * P["ux"]
         elif score_type == SCORE_SM_XY:
@@ -2340,6 +2335,8 @@ def score_census_tally(P, tally, data, mcdc):
             score = flux * P["uz"] * P["uz"]
         elif score_type == SCORE_PARTICLE_DENSITY:
             score = 1
+        elif score_type == SCORE_WEIGHT_DENSITY:
+            score = flux
         elif score_type == SCORE_CURRENT_X:
             score = flux * P["ux"]
         elif score_type == SCORE_CURRENT_Y:
@@ -2348,7 +2345,6 @@ def score_census_tally(P, tally, data, mcdc):
             score = flux * P["uz"]
 
         tally_bin[TALLY_SCORE, idx + i] += score
-        # print(score)
 
 
 @njit
@@ -3595,18 +3591,20 @@ def weight_window(P, prog):
         epsilon = mcdc["technique"]["ww"]["epsilon"]
         width = mcdc["technique"]["ww"]["width"]
         center = mcdc["technique"]["ww"]["center"][t,mcdc["technique"]["ww"]["idx_update"]-1, x, y, z]
-        
+        # Population control factor
+        center *= mcdc["technique"]["pc_factor"]
         # upper limit
         ulimit = center * width
 
         # lower limit
         llimit = center / width
+        idx_n0 = mcdc["idx_census"]
 
         # If above target
         if P["w"] > ulimit:
 
             # Splitting
-            n_split = math.ceil(P["w"] / ulimit)
+            n_split = math.ceil(P["w"] / (ulimit/3))
 
             # Set target weight
             P["w"] /= n_split
@@ -3620,7 +3618,7 @@ def weight_window(P, prog):
 
             # Russian roulette
             # Survival weight
-            w_survival = 1.1 * llimit
+            w_survival = llimit*3
 
             xi = rng(P)
 
@@ -3628,7 +3626,6 @@ def weight_window(P, prog):
                 P["alive"] = False
             else:
                 P["w"] = w_survival
-
 
 def get_tally(idx, mcdc, data, score, tally_type):
     # Determine the correct tally list based on tally_type
@@ -3712,34 +3709,56 @@ def calculate_cross_sections(idx, mcdc, det):
         Sigma_f[i] = materials[mat_idx]["fission"][0]
     return Sigma_t, Sigma_s, Sigma_f
 
+import numpy as np
+
 def smooth_vector(vector, window_size=1):
     """
-    Smooth a vector by averaging each element with its neighboring elements.
+    Smooth a vector by averaging or using Fourier smoothing.
 
     Parameters:
     - vector (np.ndarray): The input vector to be smoothed.
-    - window_size (int): The number of neighboring elements on each side to include in the average.
+    - window_size (int): If positive, the number of neighboring elements on each side to include in the average.
+                         If negative, apply Fourier smoothing.
 
     Returns:
     - np.ndarray: The smoothed vector.
     """
-    if window_size < 1:
-        raise ValueError("window_size must be at least 1")
-
-    smoothed_vector = np.zeros_like(vector)
     vector_length = len(vector)
 
-    for i in range(vector_length):
-        # Determine the start and end indices for the window
-        start_idx = max(0, i - window_size)
-        end_idx = min(vector_length, i + window_size + 1)
+    if window_size < 0:
+        # Fourier smoothing for negative window_size
+        # Apply Fourier Transform
+        fft_vector = np.fft.fft(vector)
+        fft_vector2 = np.fft.fft(vector)
+        
+        # Determine the cutoff frequency (lower frequencies for larger |window_size|)
+        cutoff_frequency = int(np.abs(window_size))
 
-        # Average the elements in the window
-        smoothed_vector[i] = np.mean(vector[start_idx:end_idx])
+        # Create a low-pass filter: zero out high-frequency components
+        fft_vector[cutoff_frequency:vector_length-cutoff_frequency] = 0
+
+        smoothed_vector = np.fft.ifft(fft_vector).real
+        mask = np.abs(vector) <= 1e-4
+        smoothed_vector[mask] = vector[mask]
+
+
+    else:
+        if window_size < 1:
+            raise ValueError("window_size must be at least 1 when positive")
+
+        # Initialize the smoothed vector
+        smoothed_vector = np.zeros_like(vector)
+
+        # Apply the moving average smoothing
+        for i in range(vector_length):
+            start_idx = int(max(0, i - window_size))
+            end_idx = int(min(vector_length, i + window_size + 1))
+            smoothed_vector[i] = np.mean(vector[start_idx:end_idx])
 
     return smoothed_vector
 
-def get_state(idx, mcdc, data, plot_ic=True):
+
+def get_state(idx, mcdc, data, plot_ic=False):
     dt = abs(mcdc["technique"]["ww"]["mesh"]["t"][idx + 1] - mcdc["technique"]["ww"]["mesh"]["t"][idx])
     dt_old = abs(mcdc["technique"]["ww"]["mesh"]["t"][idx] - mcdc["technique"]["ww"]["mesh"]["t"][idx - 1])
     dz = abs(mcdc["technique"]["ww"]["mesh"]["z"][1:] - mcdc["technique"]["ww"]["mesh"]["z"][:-1])
@@ -3816,21 +3835,6 @@ def get_state(idx, mcdc, data, plot_ic=True):
         SM_n2 =  mcdc["technique"]["integrated_source"]*SM_old/(dt*dz* N_particle)
         SM_IC = SM_n1 + 0.5 * dt * (SM_n1 - SM_n2) / (0.5 * dt + 0.5 * dt_old)
 
-    # Time crossing with spatially interpolated current (smoothed)
-    elif mcdc["technique"]["ww"]["epsilon"][WW_IC] == 3:
-        # getting crossing tallies
-        phi_crossing, _ = get_tally(idx, mcdc, data, SCORE_FLUX, "census")
-        J_crossing, _ = get_tally(idx, mcdc, data, SCORE_CURRENT_Z, "census")
-        SM_crossing, _ = get_tally(idx, mcdc, data, SCORE_SM_ZZ, "census")
-        smooth_factor =  2#int(len(phi_crossing)/75)
-        # phi crossing
-        phi_IC = smooth_vector(mcdc["technique"]["integrated_source"]*phi_crossing/(dz* N_particle),smooth_factor)
-        # SM/F crossing 
-        SM_IC = smooth_vector(mcdc["technique"]["integrated_source"]*SM_crossing/(dz* N_particle),smooth_factor)
-        # Current interpolated in space from crossing
-        J_IC = smooth_vector(mcdc["technique"]["integrated_source"]*((J_crossing[1:]/dz[1:]+J_crossing[:-1]/dz[:-1])/2)/(N_particle),smooth_factor)
-
-
     F_IC = (1.0 / 3.0) * phi_IC - SM_IC
 
     if plot_ic:
@@ -3854,6 +3858,12 @@ def get_state(idx, mcdc, data, plot_ic=True):
         hybrid_J[-1] = J_IC[-1]
     else:
         hybrid_J = J_IC
+    
+    # apply smoothing
+    if mcdc["technique"]["ww"]["epsilon"][WW_IC_SMOOTHING] != 0:
+        hybrid_phi = smooth_vector(hybrid_phi,mcdc["technique"]["ww"]["epsilon"][WW_IC_SMOOTHING])
+        hybrid_J = smooth_vector(hybrid_J,mcdc["technique"]["ww"]["epsilon"][WW_IC_SMOOTHING])
+        hybrid_F = smooth_vector(hybrid_F,mcdc["technique"]["ww"]["epsilon"][WW_IC_SMOOTHING])
 
     # Creating initial condition state class
     state = State(hybrid_phi, hybrid_J)
@@ -3954,6 +3964,7 @@ def ww_update(data, mcdc):
     method = mcdc["technique"]["ww"]["auto"]
     save = mcdc["technique"]["ww"]["save"]
     if method == WW_USER:
+        apply_ww_modifications(mcdc, idx_n0, epsilon, update_index)
         return
 
     if method == WW_PREVIOUS:
@@ -3981,7 +3992,7 @@ def ww_update(data, mcdc):
 
     elif method == WW_HYBRID:
         ww_hybrid_method(
-            mcdc, data, idx_n0, idx_n1, flux, dt, epsilon, save, update_index
+            mcdc, data, idx_n0, idx_n1, flux, flux_sd, dt, epsilon, save, update_index
         )
 
     apply_ww_modifications(mcdc, idx_n0, epsilon, update_index)
@@ -4030,16 +4041,20 @@ def ww_alpha_method(
         mcdc["technique"]["ww"]["alpha"][idx_n0, update_index] = alpha
 
 
-def ww_hybrid_method(mcdc, data, idx_n0, idx_n1, flux, dt, epsilon, save, update_index):
+def ww_hybrid_method(mcdc, data, idx_n0, idx_n1, flux, flux_sdev,dt, epsilon, save, update_index):
     if epsilon[WW_IC] != 0 and idx_n0 < 2:
         return
-
+    
     old_state, problem = get_state(idx_n1, mcdc, data)
     if update_index > 0:
         current_state, problem = get_state(idx_n0, mcdc, data)
         old_state.F = current_state.F
         old_state.F_edge = current_state.F_edge
-    new_state = losm_timestep(old_state, old_state, problem)
+
+    if mcdc["technique"]["ww"]["epsilon"][WW_TIME_SCHEME] == 0:
+        new_state = losm_timestep(old_state, old_state, problem,method="BE")
+    elif mcdc["technique"]["ww"]["epsilon"][WW_TIME_SCHEME] == 1:
+        new_state = losm_timestep(old_state, old_state, problem,method="CN")
     new_flux = new_state.flux[1:-1]
 
     mcdc["technique"]["deterministic"]["flux"][
@@ -4059,11 +4074,12 @@ def ww_hybrid_method(mcdc, data, idx_n0, idx_n1, flux, dt, epsilon, save, update
     ] = old_state.F
 
     mcdc["technique"]["ww"]["center"][idx_n0, update_index, 0, 0, :] = (
-        new_flux / np.max(new_flux)
+        new_flux/ np.max(new_flux)
     )
-
     if save:
         mcdc["technique"]["ww"]["phi_tilde"][idx_n0, update_index, 0, 0, :] = new_flux
+        mcdc["technique"]["ww"]["phi_mc"][idx_n0, update_index, 0, 0, :] = flux
+        mcdc["technique"]["ww"]["phi_mc_sdev"][idx_n0, update_index, 0, 0, :] = flux_sdev
 
 
 def ww_leakage_method(
@@ -4122,10 +4138,9 @@ def compute_gamma(mcdc, idx_n0, update_index):
 def apply_ww_modifications(mcdc, idx_n0, epsilon, update_index):
     center = mcdc["technique"]["ww"]["center"][idx_n0, update_index, 0, 0, :]
 
-    if np.min(center) < 0:
-        center += -np.min(center)
     if epsilon[WW_MIN] > 0:
         center = center * (1 - epsilon[WW_MIN]) + epsilon[WW_MIN]
+        center[center<=0] = epsilon[WW_MIN]
     center /= np.max(center)
 
     if epsilon[WW_WOLLABER] > 0:
@@ -4322,6 +4337,23 @@ def hybrid_prepare_source(mcdc):
                                     and z == source["z"]
                                 ):
                                     det["source"][:, t, i, j, k] = source["prob"]
+                                else:
+                                    in_x = mesh["x"][i] <= source["x"]  <= mesh["x"][i+1]
+                                    in_y = mesh["y"][j] <= source["y"]  <= mesh["y"][j+1]
+                                    in_z = mesh["z"][k] <= source["z"]  <= mesh["z"][k+1]
+            
+                                    if in_x and in_y and in_z:
+                                        dx = dy = dz = 1
+                                        if (mesh["x"][i] != -INF) and (mesh["x"][i] != INF):
+                                            dx = mesh["x"][i + 1] - mesh["x"][i]
+                                        if (mesh["y"][j] != -INF) and (mesh["y"][j] != INF):
+                                            dy = mesh["y"][j + 1] - mesh["y"][j]
+                                        if (mesh["z"][k] != -INF) and (mesh["z"][k] != INF):
+                                            dz = mesh["z"][k + 1] - mesh["z"][k]
+                                        dV = dx * dy * dz
+                                        det["source"][:, t, i, j, k] = source["prob"] / dV
+
+                                    
                             else:
                                 in_x = source["box_x"][0] <= x <= source["box_x"][1]
                                 in_y = source["box_y"][0] <= y <= source["box_y"][1]
@@ -4330,7 +4362,8 @@ def hybrid_prepare_source(mcdc):
                                     det["source"][:, t, i, j, k] = source["prob"]
 
 
-def losm_timestep(current_state, previous_state, problem):
+
+def losm_timestep(current_state, previous_state, problem, method="BE"):
     """
     Perform one timestep of the LOSM method using TDMA.
 
@@ -4338,15 +4371,17 @@ def losm_timestep(current_state, previous_state, problem):
     current_state (State): Current state of the system containing flux, current, F, Pl, and Pr.
     previous_state (State): Previous state of the system containing flux and current.
     problem (Problem): Problem parameters containing cross-sections, source term, mesh, and quadrature.
-    J_in_left (float): Inflow current at the left boundary.
-    J_in_right (float): Inflow current at the right boundary.
-    v (float): Speed of neutrons. Default is 1.0.
+    method (str): Method for time-stepping: "BE" (Backward Euler) or "CN" (Crank-Nicolson). Default is "BE".
 
     Returns:
     State: Updated state with new scalar flux and current.
     """
-    phi_prev = np.copy(previous_state.flux)[1:-1]
+    phi_prev = np.copy(previous_state.flux)
     J_prev = previous_state.current
+    F = current_state.F
+    F_prev = previous_state.F
+    Pl = current_state.Pl
+    Pr = current_state.Pr
 
     q = problem.source.q
     dx = problem.mesh.dx
@@ -4354,18 +4389,20 @@ def losm_timestep(current_state, previous_state, problem):
     Nx = problem.mesh.Nx
     Nt = problem.mesh.Nt
     v = problem.source.v
-    Sigma_t = problem.xs.Sigma_t + 1 / (v * dt)
     Sigma_s = problem.xs.Sigma_s
     Sigma_f = problem.xs.Sigma_f
+    Sigma_t = problem.xs.Sigma_t
     nu = problem.xs.nu
     left_bc = problem.source.lb
     right_bc = problem.source.rb
 
+    # Spatial edge calculations
     dx_edge = np.zeros(Nx + 1)
     dx_edge[1:-1] = (dx[:-1] + dx[1:]) / 2
     dx_edge[0] = dx[0] / 2
     dx_edge[-1] = dx[-1] / 2
 
+    # Compute edge cross section
     Sigma_t_edge = np.zeros(Nx + 1)
     Sigma_t_edge[1:-1] = (Sigma_t[:-1] * dx[:-1] + Sigma_t[1:] * dx[1:]) / (
         dx[:-1] + dx[1:]
@@ -4373,130 +4410,178 @@ def losm_timestep(current_state, previous_state, problem):
     Sigma_t_edge[0] = Sigma_t[0]
     Sigma_t_edge[-1] = Sigma_t[-1]
 
-    F = current_state.F
-    Pl = current_state.Pl
-    Pr = current_state.Pr
 
-    q0 = q + phi_prev / (v * dt)
-    q1 = J_prev / (v * dt)
+    # Compute modified Sigma_t based on the method
+    if method == "BE":
+        Sigma_t_mod = problem.xs.Sigma_t + 1 / (v * dt)
+    elif method == "CN":
+        Sigma_t_mod = problem.xs.Sigma_t + 2 / (v * dt)
 
+    Sigma_t_mod_edge = np.zeros(Nx + 1)
+    Sigma_t_mod_edge[1:-1] = (Sigma_t_mod[:-1] * dx[:-1] + Sigma_t_mod[1:] * dx[1:]) / (
+        dx[:-1] + dx[1:]
+    )
+    Sigma_t_mod_edge[0] = Sigma_t_mod[0]
+    Sigma_t_mod_edge[-1] = Sigma_t_mod[-1]
+
+
+
+    # Compute Q based on the method
+    if method == "BE":
+        q0 = q + phi_prev[1:-1] / (v * dt)
+        q1 = J_prev / (v * dt)
+    elif method == "CN":
+        '''
+        q0 = (
+            q
+            + q
+            + (J_prev[:-1] - J_prev[1:]) / dx
+            + (Sigma_s + nu * Sigma_f + 2 / (v * dt) - Sigma_t) * phi_prev
+        )
+        q1 = (
+            (previous_state.F[1:] - previous_state.F[:-1])
+            + (previous_state.flux[:-1] - previous_state.flux[1:]) / 3
+        ) / dx_edge + (2 / (v * dt) - (Sigma_t_edge)) * J_prev
+
+        '''
+        q0 = (J_prev[:-1] - J_prev[1:])/dx + q + q + (Sigma_s + nu*Sigma_f+2/(v*dt)-Sigma_t)*phi_prev[1:-1]
+        q1 = (F_prev[1:] - F_prev[:-1]+(phi_prev[:-1]-phi_prev[1:])/3)/dx_edge + (2/(v*dt)-Sigma_t_edge)*J_prev
     # Coefficients for the tridiagonal matrix
     a = np.zeros(Nx + 1)
     b = np.zeros(Nx + 2)
     c = np.zeros(Nx + 1)
     d = np.zeros(Nx + 2)
+
     for i in range(0, Nx):
-        a[i] = -1 / (3 * Sigma_t_edge[i] * dx_edge[i])
+        a[i] = -1 / (3 * Sigma_t_mod_edge[i] * dx_edge[i])
         b[i + 1] = (
-            1 / (3 * Sigma_t_edge[i] * dx_edge[i])
-            + 1 / (3 * Sigma_t_edge[i + 1] * dx_edge[i + 1])
-            + (Sigma_t[i] - Sigma_s[i] - nu * Sigma_f[i]) * dx[i]
+            1 / (3 * Sigma_t_mod_edge[i] * dx_edge[i])
+            + 1 / (3 * Sigma_t_mod_edge[i + 1] * dx_edge[i + 1])
+            + (Sigma_t_mod[i] - Sigma_s[i] - nu * Sigma_f[i]) * dx[i]
         )
-        c[i + 1] = -1 / (3 * Sigma_t_edge[i + 1] * dx_edge[i + 1])
+        c[i + 1] = -1 / (3 * Sigma_t_mod_edge[i + 1] * dx_edge[i + 1])
         d[i + 1] = (
             q0[i] * dx[i]
-            - (F[i + 2] - F[i + 1]) / (Sigma_t_edge[i + 1] * dx_edge[i + 1])
-            + (F[i + 1] - F[i]) / (Sigma_t_edge[i] * dx_edge[i])
-            + q1[i] / Sigma_t_edge[i]
-            - q1[i + 1] / Sigma_t_edge[i + 1]
+            - (F[i + 2] - F[i + 1]) / (Sigma_t_mod_edge[i + 1] * dx_edge[i + 1])
+            + (F[i + 1] - F[i]) / (Sigma_t_mod_edge[i] * dx_edge[i])
+            + q1[i] / Sigma_t_mod_edge[i]
+            - q1[i + 1] / Sigma_t_mod_edge[i + 1]
         )
 
     # Boundary conditions
+
+    # Left
     # Vacuum
     if left_bc == 0:
-        b[0] = (
-            1 / (3 * Sigma_t_edge[0] * dx_edge[0])
-            + (Sigma_t[0] - Sigma_s[0] - nu * Sigma_f[0]) * dx[0]
-        )
-        c[0] = -1 / (6 * Sigma_t_edge[0] * dx_edge[0])
+        b[0] = 1 / (3 * Sigma_t_mod_edge[0] * dx_edge[0]) + 0.5
+        c[0] = -1 / (3 * Sigma_t_mod_edge[0] * dx_edge[0])
         d[0] = (
-            q0[0] * dx[0]
-            + (F[1] - F[0]) / (Sigma_t_edge[0] * dx_edge[0])
-            + q1[0] / Sigma_t_edge[0]
-            + Pl
+            Pl
+            - (F[1] - F[0]) / (Sigma_t_mod_edge[0] * dx_edge[0])
+            - q1[0] / Sigma_t_mod_edge[0]
         )
-    # Refl
+    # Reflective
     elif left_bc == 1:
         b[0] = (
-            1 / (3 * Sigma_t_edge[0] * dx[0])
-            + (Sigma_t[0] - Sigma_s[0] - nu * Sigma_f[0]) * dx[0]
+            1 / (3 * Sigma_t_mod_edge[0] * dx[0])
+            + (Sigma_t_mod[0] - Sigma_s[0] - nu * Sigma_f[0]) * dx[0]
         )
-        c[0] = -1 / (3 * Sigma_t_edge[0] * dx[0])
+        c[0] = -1 / (3 * Sigma_t_mod_edge[0] * dx[0])
         d[0] = (
             q0[0] * dx[0]
-            + (F[1] - F[0]) / (Sigma_t_edge[0] * dx_edge[0])
-            + q1[0] / Sigma_t_edge[0]
+            + (F[1] - F[0]) / (Sigma_t_mod_edge[0] * dx_edge[0])
+            + q1[0] / Sigma_t_mod_edge[0]
         )
 
+    # Right
     if right_bc == 0:
-        a[-1] = -1 / (6 * Sigma_t[-1] * dx[-1])
-        b[-1] = (
-            1 / (3 * Sigma_t[-1] * dx[-1])
-            - (Sigma_t[-1] - Sigma_s[-1] - nu * Sigma_f[-1]) * dx[-1]
-        )
+        a[-1] = 1 / (3 * Sigma_t_mod_edge[-1] * dx_edge[-1])
+        b[-1] = -1 / (3 * Sigma_t_mod_edge[-1] * dx_edge[-1]) - 0.5
         d[-1] = (
-            q0[-1] * dx[-1]
-            + (F[-1] - F[-2]) / (Sigma_t[-1] * dx[-1])
-            + q1[-1] / Sigma_t[-1]
-            - Pr
+            -Pr
+            - (F[-1] - F[-2]) / (Sigma_t_mod_edge[-1] * dx_edge[-1])
+            - q1[-1] / Sigma_t_mod_edge[-1]
         )
 
     elif right_bc == 1:
-        a[-1] = -1 / (3 * Sigma_t[-1] * dx[-1])
+        a[-1] = -1 / (3 * Sigma_t_mod[-1] * dx[-1])
         b[-1] = (
-            1 / (3 * Sigma_t[-1] * dx[-1])
-            - (Sigma_t[-1] - Sigma_s[-1] - nu * Sigma_f[-1]) * dx[-1]
+            1 / (3 * Sigma_t_mod[-1] * dx[-1])
+            - (Sigma_t_mod[-1] - Sigma_s[-1] - nu * Sigma_f[-1]) * dx[-1]
         )
         d[-1] = (
             q0[-1] * dx[-1]
-            + (F[-1] - F[-2]) / (Sigma_t[-1] * dx[-1])
-            + q1[-1] / Sigma_t[-1]
+            + (F[-1] - F[-2]) / (Sigma_t_mod[-1] * dx[-1])
+            + q1[-1] / Sigma_t_mod[-1]
         )
 
     # Solve the tridiagonal system using TDMA (Thomas algorithm)
 
     phi = tdma(a, b, c, d)
 
-    # Update current using the updated scalar flux
+    # Restore current using the updated scalar flux
+    J = (
+        (phi[:-1] - phi[1:]) / (3 * Sigma_t_mod_edge * dx_edge)
+        + q1 / Sigma_t_mod_edge
+        + (F[1:] - F[:-1]) / (Sigma_t_mod_edge * dx_edge)
+    )
 
-    J = np.zeros(Nx + 1)
+    if method == "BE":
+        res_balance = (
+            dx / (v * dt) * (phi[1:-1]-phi_prev[1:-1])
+            + J[1:]
+            - J[:-1]
+            + (Sigma_t - Sigma_s - nu * Sigma_f) * dx * phi[1:-1]
+            - q * dx
+        )
+        
+        res_sm = (
+            dx_edge / (v * dt) * (J-J_prev)
+            + (phi[1:] - phi[:-1]) / 3
+            + Sigma_t_edge * dx_edge * J
+            + F[:-1]
+            - F[1:]
+        )
+
+    elif method == "CN":
+        res_balance = (
+            dx / (v * dt) * (phi[1:-1]-phi_prev[1:-1])
+            + 0.5
+            * (
+                J[1:]
+                - J[:-1]
+                + (Sigma_t - Sigma_s - nu * Sigma_f) * dx * phi[1:-1]
+                - q * dx
+            )
+            + 0.5
+            * (
+                J_prev[1:]
+                - J_prev[:-1]
+                + (Sigma_t - Sigma_s - nu * Sigma_f) * dx * phi_prev[1:-1]
+                - q * dx
+            )
+        )
+        res_sm = (
+            dx_edge / (v * dt) * (J-J_prev)
+            + 0.5
+            * ((phi[1:] - phi[:-1]) / 3 + Sigma_t_edge * dx_edge * J + F[:-1] - F[1:])
+            + 0.5
+            * (
+                (phi_prev[1:]-phi_prev[:-1]) / 3
+                + Sigma_t_edge * dx_edge * J_prev
+                + F_prev[:-1]
+                - F_prev[1:]
+            )
+        )
+
     if left_bc == 0:
-        J[0] = (
-            (phi[0] - phi[1]) / (3 * Sigma_t_edge[0] * dx_edge[0])
-            + q1[0] / Sigma_t_edge[0]
-            + (F[1] - F[0]) / (Sigma_t_edge[0] * dx_edge[0])
-        )
-        # J[0] = -0.5*phi[0]+Pl
+        res_lb = J[0] + 0.5 * phi[0] - Pl
     elif left_bc == 1:
-        J[0] = 0
+        res_lb = J[0]
     if right_bc == 0:
-        J[-1] = (
-            (phi[-2] - phi[-1]) / (3 * Sigma_t_edge[-1] * dx_edge[-1])
-            + q1[-1] / Sigma_t_edge[-1]
-            + (F[-1] - F[-2]) / (Sigma_t_edge[-1] * dx_edge[-1])
-        )
-        # J[-1] = 0.5*phi[-1]-Pr
+        res_rb = J[-1] - 0.5 * phi[-1] + Pr
     elif right_bc == 1:
-        J[-1] = 0
-    for i in range(1, Nx):
-        J[i] = (
-            (phi[i] - phi[i + 1]) / (3 * Sigma_t_edge[i] * dx_edge[i])
-            + q1[i] / Sigma_t_edge[i]
-            + (F[i + 1] - F[i]) / (Sigma_t_edge[i] * dx_edge[i])
-        )
-
-    res_balance = (
-        J[1:] - J[:-1] + dx * ((Sigma_t - Sigma_s - nu * Sigma_f) * phi[1:-1] - q0)
-    )
-    res_sm = (
-        (1 / 3) * (phi[1:] - phi[:-1])
-        + Sigma_t_edge * dx_edge * J
-        - q1 * dx_edge
-        + F[:-1]
-        - F[1:]
-    )
-    res_lb = J[0] + 0.5 * phi[0] - Pl
-    res_rb = J[-1] - 0.5 * phi[-1] + Pr
+        res_rb = J[-1]
 
     residual = [res_balance, res_sm, res_lb, res_rb]
     new_state = State(phi, J)
@@ -4505,6 +4590,7 @@ def losm_timestep(current_state, previous_state, problem):
     new_state.Pl = Pl
     new_state.Pr = Pr
     return new_state
+
 
 
 ## Tri Diagonal Matrix Algorithm(a.k.a Thomas algorithm) solver

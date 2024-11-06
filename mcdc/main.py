@@ -612,7 +612,10 @@ def prepare():
     normalization_factor = 0
     for source in mcdc["sources"]:
         if source["box"] == 0:
-            normalization_factor += source["prob"]
+            dt = source["time"][1] - source["time"][0]
+            if dt == 0:
+                dt = 1
+            normalization_factor += source["prob"] * dt
         else:
             dx = source["box_x"][1] - source["box_x"][0]
             if dx == 0:
@@ -1577,8 +1580,13 @@ def generate_hdf5(data, mcdc):
                         score_name = "current-z"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
-                    mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
-                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    if score_type not in [SCORE_PARTICLE_DENSITY,SCORE_WEIGHT_DENSITY]:
+                        mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
+                        sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    else:
+                        mean = score_tally_bin[TALLY_SUM] * mcdc["setting"]["N_particle"]
+                        sdev = score_tally_bin[TALLY_SUM_SQ] * mcdc["setting"]["N_particle"]
+
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
@@ -1668,8 +1676,13 @@ def generate_hdf5(data, mcdc):
                         score_name = "sm-zz"
                     group_name = "tallies/edge_tally_%i/%s/" % (ID, score_name)
         
-                    mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
-                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    if score_type not in [SCORE_PARTICLE_DENSITY,SCORE_WEIGHT_DENSITY]:
+                        mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
+                        sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    else:
+                        mean = score_tally_bin[TALLY_SUM] * mcdc["setting"]["N_particle"]
+                        sdev = score_tally_bin[TALLY_SUM_SQ] * mcdc["setting"]["N_particle"]
+ 
 
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
@@ -1769,6 +1782,8 @@ def generate_hdf5(data, mcdc):
                         score_name = "sm-zz"
                     elif score_type == SCORE_PARTICLE_DENSITY:
                         score_name = "particle-density"
+                    elif score_type == SCORE_WEIGHT_DENSITY:
+                        score_name = "weight-density"
                     elif score_type == SCORE_CURRENT_X:
                         score_name = "current-x"
                     elif score_type == SCORE_CURRENT_Y:
@@ -1777,8 +1792,14 @@ def generate_hdf5(data, mcdc):
                         score_name = "current-z"
                     group_name = "tallies/census_tally_%i/%s/" % (ID, score_name)
 
-                    mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
-                    sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    if score_type not in [SCORE_PARTICLE_DENSITY,SCORE_WEIGHT_DENSITY]:
+                        mean = score_tally_bin[TALLY_SUM] * integrated_source / cell_vol
+                        sdev = score_tally_bin[TALLY_SUM_SQ] * integrated_source / cell_vol
+                    else:
+                        mean = score_tally_bin[TALLY_SUM] * mcdc["setting"]["N_particle"]
+                        sdev = score_tally_bin[TALLY_SUM_SQ] * mcdc["setting"]["N_particle"]
+
+
                     f.create_dataset(group_name + "mean", data=mean)
                     f.create_dataset(group_name + "sdev", data=sdev)
                     if mcdc["technique"]["uq"]:
@@ -1855,6 +1876,8 @@ def generate_hdf5(data, mcdc):
                         f.create_dataset("ww/gamma", data=np.squeeze(T["ww"]["gamma"]))
                 elif method == WW_HYBRID:
                     f.create_dataset("ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"]))
+                    f.create_dataset("ww/phi_mc", data=np.squeeze(T["ww"]["phi_mc"]))
+                    f.create_dataset("ww/phi_mc_sdev", data=np.squeeze(T["ww"]["phi_mc_sdev"]))
                 elif method == WW_LEAKAGE:
                     f.create_dataset("ww/phi_tilde", data=np.squeeze(T["ww"]["phi_tilde"]))
                     f.create_dataset("ww/phi_previous", data=np.squeeze(T["ww"]["phi_previous"]))

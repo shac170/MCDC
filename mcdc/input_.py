@@ -1351,7 +1351,6 @@ def weight_window(
     width=2.5,
     method={"user"},
     techniques={},
-    N_update = 0,
     save_data = True,
 ):
     """
@@ -1383,7 +1382,8 @@ def weight_window(
     """
     card = global_.input_deck.technique
     card["weight_window"] = True
-    card["ww"]["N_update"] = N_update
+    N_update = 0
+
     card["ww"]["save"] = save_data
     # Set width
     if width is not None:
@@ -1414,7 +1414,7 @@ def weight_window(
         tech_checked = check_support(
             "Weight window technique",
             tech[0],
-            ["min-center", "wollaber","limit-gamma","limit-leakage","time-interpolation"],
+            ["min-center", "wollaber","limit-gamma","limit-leakage","initial-conditions","time-scheme","smoothing-factor","n-update"],
         )
         if tech_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = tech[1]
@@ -1427,8 +1427,14 @@ def weight_window(
         if tech_checked == "limit-leakage":
             card["ww"]["epsilon"][WW_LIMIT_LEAKAGE] = 1
             hybrid_needed = True
-        if tech_checked == "time-interpolation":
+        if tech_checked == "initial-conditions":
             card["ww"]["epsilon"][WW_IC] = tech[1]
+        if tech_checked == "time-scheme":
+            card["ww"]["epsilon"][WW_TIME_SCHEME] = tech[1]
+        if tech_checked == "smoothing-factor":
+            card["ww"]["epsilon"][WW_IC_SMOOTHING] = tech[1]
+        if tech_checked == "n-update":
+            N_update = tech[1]
 
     # Set mesh
     if x is not None:
@@ -1468,14 +1474,14 @@ def weight_window(
         ax_expand.append(3)
     if z is None:
         ax_expand.append(4)
-    window /= np.max(window)
+    #window /= np.max(window)
     for ax in ax_expand:
         window = np.expand_dims(window, axis=ax)
     card["ww"]["center"] = window
     if hybrid_needed:
         card["hybrid"] = True
         card["deterministic"]["mesh"] = card["ww"]["mesh"]
-
+    card["ww"]["N_update"] = N_update
     card["ww"]["center"] = window
     return card
 

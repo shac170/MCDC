@@ -1039,7 +1039,7 @@ def make_type_technique(input_deck):
     ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
-    ww_list += [("epsilon", float64, (6,))]
+    ww_list += [("epsilon", float64, (8,))]
     ww_list += [("center", float64, (Nt, N_update, Nx, Ny, Nz))]
     ww_list += [("N_update", float64)]    
     ww_list += [("save", bool_)]
@@ -1057,6 +1057,11 @@ def make_type_technique(input_deck):
                     ww_list += [("gamma", float64, (Nt, N_update, Nx, Ny, Nz))]
             elif card["ww"]["auto"] == WW_HYBRID:
                 ww_list += [("phi_tilde", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("phi_mc", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("phi_mc_sdev", float64, (Nt, N_update, Nx, Ny, Nz))]
+                ww_list += [("time_scheme", int64)]
+                if card["ww"]["epsilon"][WW_IC_SMOOTHING] > 0:
+                    ww_list += [("ic_smoothing", int64)]
             elif card["ww"]["auto"] == WW_LEAKAGE:
                 ww_list += [("phi_tilde", float64, (Nt, N_update, Nx, Ny, Nz))]
                 ww_list += [("current", float64, (Nt, N_update, Nx+1, Ny+1, Nz+1))]
