@@ -1960,7 +1960,6 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
                 SigmaF = get_MacroXS(XS_FISSION, material, P_arr, mcdc)
                 score = flux * SigmaF
             if score_type == SCORE_NET_CURRENT:
-                #hello
                 score = flux*mu
             if score_type == SCORE_MU_SQ:
                 score = flux*mu*mu
