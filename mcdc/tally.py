@@ -102,15 +102,23 @@ def mesh_tally(
         score_checked = check_support(
             "score type",
             s,
-            ["flux", "total", "fission", "density",
-              "net-current",
-              "mu-sq",
-              "time-moment-flux",
-              "space-moment-flux",
-              "time-moment-current",
-              "space-moment-current",
-              "time-moment-mu-sq",
-              "space-moment-mu-sq"],
+            [
+                "flux",
+                "total",
+                "fission",
+                "density",
+                "net-current",
+                "mu-sq",
+                "time-moment-flux",
+                "space-moment-flux",
+                "space-time-moment-flux",
+                "time-moment-current",
+                "space-moment-current",
+                "space-time-moment-current",
+                "time-moment-mu-sq",
+                "space-moment-mu-sq",
+                "space-time-moment-mu-sq",
+            ],
         )
         card.scores.append(score_checked)
 
