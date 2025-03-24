@@ -42,8 +42,12 @@ from mcdc.constant import (
     TINY,
     WW_MIN,
     WW_PREVIOUS,
+    WW_ALPHA,
+    WW_DMD,
     WW_USER,
-    WW_WOLLABER,
+    WW_WOLLABER1,
+    WW_WOLLABER2,
+    WW_N_SNAP,
 )
 from mcdc.print_ import print_error
 import mcdc.type_ as type_
@@ -1341,7 +1345,7 @@ def weight_window(
     method_checked = check_support(
         "Weight window method",
         method,
-        ["user", "previous"],
+        ["user", "previous", "alpha", "dmd"],
     )
     if method_checked == "user":
         card["ww"]["auto"] = WW_USER
@@ -1388,18 +1392,106 @@ def weight_window(
         # Add to deck
         global_.input_deck.mesh_tallies.append(tcard)
 
+    elif method_checked == "alpha":
+        card["ww"]["auto"] = WW_ALPHA
+
+        scores = (["flux"],)
+        # Make tally card
+        tcard = MeshTallyCard()
+
+        # Set ID
+        tcard.ID = len(global_.input_deck.mesh_tallies)
+        card["ww"]["tally_idx"] = tcard.ID
+
+        # Set mesh
+        tcard.x = x
+        tcard.y = y
+        tcard.z = z
+
+        # Set other filters
+        tcard.t = t
+        tcard.mu = mu
+        tcard.azi = azi
+
+        # Set energy group grid
+        if type(g) == type("string") and g == "all":
+            G = global_.input_deck.materials[0].G
+            tcard.g = np.linspace(0, G, G + 1) - 0.5
+        else:
+            tcard.g = g
+        if global_.input_deck.setting["mode_CE"]:
+            tcard.g = E
+
+        # Calculate total number bins
+        Nx = len(tcard.x) - 1
+        Ny = len(tcard.y) - 1
+        Nz = len(tcard.z) - 1
+        Nt = len(tcard.t) - 1
+        Nmu = len(tcard.mu) - 1
+        N_azi = len(tcard.azi) - 1
+        Ng = len(tcard.g) - 1
+        tcard.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
+        tcard.scores.append("flux")
+        # Add to deck
+        global_.input_deck.mesh_tallies.append(tcard)
+
+    elif method_checked == "dmd":
+        card["ww"]["auto"] = WW_DMD
+
+        scores = (["flux"],)
+        # Make tally card
+        tcard = MeshTallyCard()
+
+        # Set ID
+        tcard.ID = len(global_.input_deck.mesh_tallies)
+        card["ww"]["tally_idx"] = tcard.ID
+
+        # Set mesh
+        tcard.x = x
+        tcard.y = y
+        tcard.z = z
+
+        # Set other filters
+        tcard.t = t
+        tcard.mu = mu
+        tcard.azi = azi
+
+        # Set energy group grid
+        if type(g) == type("string") and g == "all":
+            G = global_.input_deck.materials[0].G
+            tcard.g = np.linspace(0, G, G + 1) - 0.5
+        else:
+            tcard.g = g
+        if global_.input_deck.setting["mode_CE"]:
+            tcard.g = E
+
+        # Calculate total number bins
+        Nx = len(tcard.x) - 1
+        Ny = len(tcard.y) - 1
+        Nz = len(tcard.z) - 1
+        Nt = len(tcard.t) - 1
+        Nmu = len(tcard.mu) - 1
+        N_azi = len(tcard.azi) - 1
+        Ng = len(tcard.g) - 1
+        tcard.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
+        tcard.scores.append("flux")
+        # Add to deck
+        global_.input_deck.mesh_tallies.append(tcard)
+
     # Checking techniques
     for mod in modifications:
         mod_checked = check_support(
             "Weight window modification",
             mod[0],
-            ["min-center", "wollaber"],
+            ["min-center", "wollaber", "n-snapshot"],
         )
         if mod_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = mod[1]
         if mod_checked == "wollaber":
-            card["ww"]["epsilon"][WW_WOLLABER] = mod[1]
-            card["ww"]["epsilon"][WW_WOLLABER + 1] = mod[2]
+            card["ww"]["epsilon"][WW_WOLLABER1] = mod[1]
+            card["ww"]["epsilon"][WW_WOLLABER2] = mod[2]
+        if mod_checked == "n-snapshot":
+            card["ww"]["epsilon"][WW_N_SNAP] = mod[1]
 
     # Set mesh
     card["ww"]["mesh"]["x"] = x
@@ -1420,20 +1512,7 @@ def weight_window(
 
     if window is None:
         window = np.ones((Nt, Nx, Ny, Nz))
-    """
-    # Set window
-    ax_expand = []
-    if t is None:
-        ax_expand.append(0)
-    if x is None:
-        ax_expand.append(1)
-    if y is None:
-        ax_expand.append(2)
-    if z is None:
-        ax_expand.append(3)
-    for ax in ax_expand:
-        window = np.expand_dims(window, axis=ax)
-    """
+
     card["ww"]["center"] = window
     return card, tcard
 

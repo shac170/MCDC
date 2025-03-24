@@ -2284,6 +2284,27 @@ def recombine_tallies(file="output.h5"):
                 Nmu = len(grid["mu"][()]) - 1
                 N_azi = len(grid["azi"][()]) - 1
                 Ng = len(grid["g"][()]) - 1
+                if f["input_deck"]["technique"]["ww"]["save"][()]:
+                    if f["input_deck"]["technique"]["ww"]["auto"][()] == WW_USER:
+                        weight_windows = np.zeros_like(
+                            f["input_deck"]["technique"]["ww"]["center"][()]
+                        )
+                    elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_PREVIOUS:
+                        weight_windows = np.zeros_like(
+                            f["input_deck"]["technique"]["ww"]["center"][()]
+                        )
+                    elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_ALPHA:
+                        weight_windows = np.zeros_like(
+                            f["input_deck"]["technique"]["ww"]["center"][()]
+                        )
+                        alpha = np.zeros_like(
+                            f["input_deck"]["technique"]["ww"]["center"][()]
+                        )
+                    elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_DMD:
+                        weight_windows = np.zeros_like(
+                            f["input_deck"]["technique"]["ww"]["center"][()]
+                        )
+
                 # Creating structure of correct size to hold combined tally
                 for tally_type in tally_info[1:]:
                     tally_score = np.zeros(
@@ -2318,12 +2339,51 @@ def recombine_tallies(file="output.h5"):
                                 ] += (
                                     score * score
                                 )
+
+                                if (
+                                    f["input_deck"]["technique"]["ww"]["save"][()]
+                                    and i_census < N_census - 1
+                                ):
+                                    if (
+                                        f["input_deck"]["technique"]["ww"]["auto"][()]
+                                        == WW_USER
+                                    ):
+                                        weight_windows[i_census + 1] = f1[
+                                            "weight_windows/center"
+                                        ][:]
+                                    elif (
+                                        f["input_deck"]["technique"]["ww"]["auto"][()]
+                                        == WW_PREVIOUS
+                                    ):
+                                        weight_windows[i_census + 1] = f1[
+                                            "weight_windows/center"
+                                        ][:]
+                                    elif (
+                                        f["input_deck"]["technique"]["ww"]["auto"][()]
+                                        == WW_ALPHA
+                                    ):
+                                        if i_census > 0:
+                                            weight_windows[i_census + 1] = f1[
+                                                "weight_windows/center"
+                                            ][:]
+                                            alpha[i_census + 1] = f1["weight_windows"][
+                                                "alpha"
+                                            ][:]
+                                    elif (
+                                        f["input_deck"]["technique"]["ww"]["auto"][()]
+                                        == WW_DMD
+                                    ):
+                                        weight_windows[i_census + 1] = f1[
+                                            "weight_windows/center"
+                                        ][:]
+
                     tally_score /= N_batch
                     if N_batch > 0:
                         tally_score_sq = np.sqrt(
                             (tally_score_sq / N_batch - np.square(tally_score))
                             / (N_batch - 1)
                         )
+
                     f.create_dataset(
                         "tallies/" + tally_info[0] + "/" + tally_type + "/mean",
                         data=tally_score,
@@ -2332,6 +2392,7 @@ def recombine_tallies(file="output.h5"):
                         "tallies/" + tally_info[0] + "/" + tally_type + "/sdev",
                         data=tally_score_sq,
                     )
+
                 f.create_dataset(
                     "tallies/" + tally_info[0] + "/grid/x", data=grid["x"][()]
                 )
@@ -2351,7 +2412,18 @@ def recombine_tallies(file="output.h5"):
                 f.create_dataset(
                     "tallies/" + tally_info[0] + "/grid/g", data=grid["g"][()]
                 )
-            f.close()
+
+        with h5py.File(output_name + ".h5", "a") as f:
+            if f["input_deck"]["technique"]["ww"]["save"][()]:
+                if f["input_deck"]["technique"]["ww"]["auto"][()] == WW_USER:
+                    f.create_dataset("weight_windows/center", data=weight_windows)
+                elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_PREVIOUS:
+                    f.create_dataset("weight_windows/center", data=weight_windows)
+                elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_ALPHA:
+                    f.create_dataset("weight_windows/center", data=weight_windows)
+                    f.create_dataset("weight_windows/alpha", data=alpha)
+                elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_DMD:
+                    f.create_dataset("weight_windows/center", data=weight_windows)
         for i_census in range(N_census):
             for i_batch in range(N_batch):
                 file_name = (

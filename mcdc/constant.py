@@ -156,6 +156,10 @@ NU_FISSION_DELAYED = 2
 # Weight Windows Methods
 WW_USER = 0
 WW_PREVIOUS = 1
+WW_ALPHA = 2
+WW_DMD = 3
 # Weight Windows Modifications
 WW_MIN = 0
-WW_WOLLABER = 1
+WW_WOLLABER1 = 1
+WW_WOLLABER2 = 2
+WW_N_SNAP = 3
