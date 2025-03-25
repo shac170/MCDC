@@ -1896,17 +1896,6 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
         + iy * stride["y"]
         + iz * stride["z"]
     )
-    if t == mesh["t"][it + 1] or t == mesh["t"][it]:
-        idx = (
-        stride["tally"]
-        + mu * stride["mu"]
-        + azi * stride["azi"]
-        + g * stride["g"]
-        + it * stride["t"]
-        + ix * stride["x"]
-        + iy * stride["y"]
-        + iz * stride["z"]
-        )
     # Sweep through the distance
     distance_swept = 0.0
     while distance_swept < distance - COINCIDENCE_TOLERANCE:
@@ -1956,6 +1945,11 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
         # Score
         flux = distance_scored * P["w"]
         mu = P["ux"]
+        #print((t - (mesh["t"][it + 1] + mesh["t"][it]) / 2),t,(mesh["t"][it + 1]),(mesh["t"][it]))
+        P = P_arr[0]
+        x1 = P["x"] + P["ux"] * distance_scored
+        x0 = P["x"]
+        P["t"] += distance / physics.get_speed(P_arr, mcdc)
         for i in range(tally["N_score"]):
             score_type = tally["scores"][i]
             score = 0
@@ -1969,17 +1963,15 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
             elif score_type == SCORE_FISSION:
                 SigmaF = get_MacroXS(XS_FISSION, material, P_arr, mcdc)
                 score = flux * SigmaF
-            if score_type == SCORE_NET_CURRENT:
+            elif score_type == SCORE_NET_CURRENT:
                 score = flux * mu
-            if score_type == SCORE_MU_SQ:
+            elif score_type == SCORE_MU_SQ:
                 score = flux * mu * mu
             elif score_type == SCORE_TIME_MOMENT_FLUX:
-                if t == mesh["t"][it + 1] or t == mesh["t"][it]:
-                    score = flux * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
-                else:
-                    score = flux * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
+                score = flux * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
             elif score_type == SCORE_SPACE_MOMENT_FLUX:
-                score = flux * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
+                #score = flux * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
+                score = P["w"]/ux * (0.5 *(x1**2-x0**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x0))
             elif score_type == SCORE_SPACE_TIME_MOMENT_FLUX:
                 score = (
                     flux
