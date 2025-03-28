@@ -1320,11 +1320,12 @@ def weight_window(
         Center of the weight windows (default None).
     width : float, optional
         Width of the window (default 2.5).
-    epsilon : float, optional
-        Small values used for techniques (default empty list).
-    techniques : list of str, optional
-        List of techniques to use for ww
-        {'user','previous','alpha','min_center','wollaber'} (default {'user'}).
+    method : list of str, optional
+        List of methods to use for ww
+        {'user','previous','alpha','dmd'} (default {'user'}).
+    modifications : list of str, optional
+        List of modifications to use for ww
+        {['min_center',epsilon],['wollaber',epsilon1,epsilon2],['n_snapshot',n]}.
     Returns
     -------
         A weight window card.
