@@ -3647,8 +3647,10 @@ def update_weight_windows(data, mcdc):
     idx_census = mcdc["idx_census"]
     center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
     epsilon = mcdc["technique"]["ww"]["epsilon"]
+
     if mcdc["technique"]["ww"]["auto"] == WW_USER:
         return
+
     elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
         center = ww_previous(data, mcdc)
         mcdc["technique"]["ww"]["center"][idx_census + 1] = center
@@ -3740,7 +3742,7 @@ def ww_previous(data, mcdc):
 
 @njit
 def ww_alpha(data, mcdc):
-    # accessing most recent tally dump
+    # accessing most recent two tally dumps
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
@@ -3783,6 +3785,7 @@ def ww_alpha(data, mcdc):
             - mcdc["setting"]["census_time"][idx_census - 1]
         )
 
+        # Computing alpha
         alpha = (1 / dt) * np.log(np.abs(flux1 / flux2) + 1e-2)
         alpha[flux2 == 0] = 1 / dt
         alpha[alpha > 3] = 2
@@ -3802,7 +3805,7 @@ def ww_alpha(data, mcdc):
 
 @njit
 def ww_dmd(data, mcdc):
-    # accessing most recent tally dump
+    # accessing snapshots
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
@@ -3837,6 +3840,8 @@ def ww_dmd(data, mcdc):
             snapshot = np.array(flux).flatten()
             snapshots.append(snapshot)
         snapshots = np.flip(np.array(snapshots).T, 1)
+
+        # Performing DMD
         X1 = snapshots[:, :-1]
         X2 = snapshots[:, 1:]
         # Singular value decomposition of the first collection of snapshots
@@ -3852,13 +3857,12 @@ def ww_dmd(data, mcdc):
         Vh = Vh[:r, :].conj().T
 
         Atilde = U.conj().T @ X2 @ Vh @ Sinv
-
         eigenvalues, eigenvectors = np.linalg.eig(Atilde)
         PSI = X2 @ Vh @ Sinv @ eigenvectors
         omega = np.log(np.abs(eigenvalues))
         b = np.linalg.pinv(PSI) @ snapshots[:, M - 1]
-        new_data = np.real(PSI @ np.diag(np.exp(omega)) @ b)
 
+        new_data = np.real(PSI @ np.diag(np.exp(omega)) @ b)
         center = np.reshape(new_data, tally_shape)
 
         ax_expand = []
@@ -3871,16 +3875,6 @@ def ww_dmd(data, mcdc):
         for ax in ax_expand:
             center = np.expand_dims(center, axis=ax)
         f.close()
-        """
-        if mcdc["technique"]["ww"]["save"]:
-            f = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "a",
-            )
-            f.create_dataset("weight_windows/alpha", data=alpha)
-            f.close()
-        """
     return center
 
 
