@@ -88,7 +88,7 @@ class InputDeck:
                 "width": 2.5,
                 "mesh": make_card_mesh(),
                 "auto": 0,
-                "epsilon": np.zeros(4),
+                "epsilon": np.zeros(6),
                 "save": False,
                 "tally_idx": 0,
             },

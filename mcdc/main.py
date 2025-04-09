@@ -1952,20 +1952,6 @@ def generate_hdf5(data, mcdc):
                         score_name = "fission"
                     elif score_type == SCORE_NET_CURRENT:
                         score_name = "current"
-                    elif score_type == SCORE_MU_SQ:
-                        score_name = "mu-sq"
-                    elif score_type == SCORE_TIME_MOMENT_FLUX:
-                        score_name = "time-moment-flux"
-                    elif score_type == SCORE_SPACE_MOMENT_FLUX:
-                        score_name = "space-moment-flux"
-                    elif score_type == SCORE_TIME_MOMENT_CURRENT:
-                        score_name = "time-moment-current"
-                    elif score_type == SCORE_SPACE_MOMENT_CURRENT:
-                        score_name = "space-moment-current"
-                    elif score_type == SCORE_TIME_MOMENT_MU_SQ:
-                        score_name = "time-moment-mu-sq"
-                    elif score_type == SCORE_SPACE_MOMENT_MU_SQ:
-                        score_name = "space-moment-mu-sq"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
                     mean = score_tally_bin[TALLY_SUM]
@@ -2284,26 +2270,6 @@ def recombine_tallies(file="output.h5"):
                 Nmu = len(grid["mu"][()]) - 1
                 N_azi = len(grid["azi"][()]) - 1
                 Ng = len(grid["g"][()]) - 1
-                if f["input_deck"]["technique"]["ww"]["save"][()]:
-                    if f["input_deck"]["technique"]["ww"]["auto"][()] == WW_USER:
-                        weight_windows = np.zeros_like(
-                            f["input_deck"]["technique"]["ww"]["center"][()]
-                        )
-                    elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_PREVIOUS:
-                        weight_windows = np.zeros_like(
-                            f["input_deck"]["technique"]["ww"]["center"][()]
-                        )
-                    elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_ALPHA:
-                        weight_windows = np.zeros_like(
-                            f["input_deck"]["technique"]["ww"]["center"][()]
-                        )
-                        alpha = np.zeros_like(
-                            f["input_deck"]["technique"]["ww"]["center"][()]
-                        )
-                    elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_DMD:
-                        weight_windows = np.zeros_like(
-                            f["input_deck"]["technique"]["ww"]["center"][()]
-                        )
 
                 # Creating structure of correct size to hold combined tally
                 for tally_type in tally_info[1:]:
@@ -2312,8 +2278,9 @@ def recombine_tallies(file="output.h5"):
                     )
                     tally_score = np.squeeze(tally_score)
                     tally_score_sq = np.zeros_like(tally_score)
-
+                    weight_window_save = {}
                     for i_census in range(N_census):
+                        batch_data = {}
                         for i_batch in range(N_batch):
                             with h5py.File(
                                 output_name
@@ -2339,43 +2306,20 @@ def recombine_tallies(file="output.h5"):
                                 ] += (
                                     score * score
                                 )
+                                if "weight_windows" in f1:
+                                    for key in f1["weight_windows"]:
+                                        data = f1["weight_windows"][key][()]
 
-                                if (
-                                    f["input_deck"]["technique"]["ww"]["save"][()]
-                                    and i_census < N_census - 1
-                                ):
-                                    if (
-                                        f["input_deck"]["technique"]["ww"]["auto"][()]
-                                        == WW_USER
-                                    ):
-                                        weight_windows[i_census + 1] = f1[
-                                            "weight_windows/center"
-                                        ][:]
-                                    elif (
-                                        f["input_deck"]["technique"]["ww"]["auto"][()]
-                                        == WW_PREVIOUS
-                                    ):
-                                        weight_windows[i_census + 1] = f1[
-                                            "weight_windows/center"
-                                        ][:]
-                                    elif (
-                                        f["input_deck"]["technique"]["ww"]["auto"][()]
-                                        == WW_ALPHA
-                                    ):
-                                        if i_census > 0:
-                                            weight_windows[i_census + 1] = f1[
-                                                "weight_windows/center"
-                                            ][:]
-                                            alpha[i_census + 1] = f1["weight_windows"][
-                                                "alpha"
-                                            ][:]
-                                    elif (
-                                        f["input_deck"]["technique"]["ww"]["auto"][()]
-                                        == WW_DMD
-                                    ):
-                                        weight_windows[i_census + 1] = f1[
-                                            "weight_windows/center"
-                                        ][:]
+                                        if key not in batch_data:
+                                            batch_data[key] = data
+                                        batch_data[key] += data
+
+                        if N_batch > 0:
+                            for key in batch_data:
+                                batch_data[key] /= N_batch
+                                if key not in weight_window_save:
+                                    weight_window_save[key] = []
+                                weight_window_save[key].append(batch_data[key])
 
                     tally_score /= N_batch
                     if N_batch > 0:
@@ -2413,17 +2357,35 @@ def recombine_tallies(file="output.h5"):
                     "tallies/" + tally_info[0] + "/grid/g", data=grid["g"][()]
                 )
 
+        # Save weight window data
+        for i_census in range(N_census):
+            batch_data = {}
+            for i_batch in range(N_batch):
+                with h5py.File(
+                    output_name + "-batch_%i-census_%i.h5" % (i_batch, i_census),
+                    "r",
+                ) as f1:
+
+                    if "weight_windows" in f1:
+                        for key in f1["weight_windows"]:
+                            data = f1["weight_windows"][key][()]
+
+                            if key not in batch_data:
+                                batch_data[key] = data
+                            batch_data[key] += data
+
+            if N_batch > 0:
+                for key in batch_data:
+                    batch_data[key] /= N_batch
+                    if key not in weight_window_save:
+                        weight_window_save[key] = []
+                    weight_window_save[key].append(batch_data[key])
+
         with h5py.File(output_name + ".h5", "a") as f:
-            if f["input_deck"]["technique"]["ww"]["save"][()]:
-                if f["input_deck"]["technique"]["ww"]["auto"][()] == WW_USER:
-                    f.create_dataset("weight_windows/center", data=weight_windows)
-                elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_PREVIOUS:
-                    f.create_dataset("weight_windows/center", data=weight_windows)
-                elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_ALPHA:
-                    f.create_dataset("weight_windows/center", data=weight_windows)
-                    f.create_dataset("weight_windows/alpha", data=alpha)
-                elif f["input_deck"]["technique"]["ww"]["auto"][()] == WW_DMD:
-                    f.create_dataset("weight_windows/center", data=weight_windows)
+            # if f["input_deck"]["technique"]["ww"]["save"][()]:
+            for key in weight_window_save:
+                f.create_dataset("weight_windows/" + key, data=weight_window_save[key])
+
         for i_census in range(N_census):
             for i_batch in range(N_batch):
                 file_name = (
