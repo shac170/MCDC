@@ -2378,7 +2378,7 @@ def recombine_tallies(file="output.h5"):
                                         ][:]
 
                     tally_score /= N_batch
-                    if N_batch > 0:
+                    if N_batch > 1:
                         tally_score_sq = np.sqrt(
                             (tally_score_sq / N_batch - np.square(tally_score))
                             / (N_batch - 1)

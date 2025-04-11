@@ -131,7 +131,10 @@ def loop_fixed_source(data_arr, mcdc_arr):
 
             # Time census-based tally closeout
             if mcdc["setting"]["census_based_tally"]:
-                kernel.tally_reduce(data, mcdc)
+                if mcdc["setting"]["N_batch"] > 1:
+                    kernel.tally_reduce(data, mcdc)
+                else:
+                    kernel.tally_closeout(data, mcdc)
                 if mcdc["mpi_master"]:
                     kernel.census_based_tally_output(data, mcdc)
                     if (
@@ -335,8 +338,8 @@ def source_closeout(prog, idx_work, N_prog, data):
 
     # Tally history closeout for one-batch fixed-source simulation
     if not mcdc["setting"]["mode_eigenvalue"] and mcdc["setting"]["N_batch"] == 1:
-        if not mcdc["setting"]["census_based_tally"]:
-            kernel.tally_accumulate(data, mcdc)
+        # if not mcdc["setting"]["census_based_tally"]:
+        kernel.tally_accumulate(data, mcdc)
 
     # Tally history closeout for multi-batch uq simulation
     if mcdc["technique"]["uq"]:

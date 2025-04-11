@@ -2346,7 +2346,7 @@ def tally_accumulate(data, mcdc):
     N_bin = tally_bin.shape[1]
 
     for i in range(N_bin):
-        # Accumulate score and square of score into sum and sum_sq
+        # score and square of score into sum and sum_sq
         score = tally_bin[TALLY_SCORE, i]
         tally_bin[TALLY_SUM, i] += score
         tally_bin[TALLY_SUM_SQ, i] += score * score
@@ -2361,15 +2361,15 @@ def census_based_tally_output(data, mcdc):
     idx_census = mcdc["idx_census"]
     tally_bin = data[TALLY]
     N_bin = tally_bin.shape[1]
+    if mcdc["setting"]["N_batch"] > 1:
+        for i in range(N_bin):
+            # Store score and square of score
+            score = tally_bin[TALLY_SCORE, i]
+            tally_bin[TALLY_SUM, i] = score
+            tally_bin[TALLY_SUM_SQ, i] = score * score
 
-    for i in range(N_bin):
-        # Store score and square of score
-        score = tally_bin[TALLY_SCORE, i]
-        tally_bin[TALLY_SUM, i] = score
-        tally_bin[TALLY_SUM_SQ, i] = score * score
-
-        # Reset score bin
-        tally_bin[TALLY_SCORE, i] = 0.0
+            # Reset score bin
+            tally_bin[TALLY_SCORE, i] = 0.0
 
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         mesh = tally["filter"]

@@ -51,7 +51,7 @@ mcdc.setting(
     N_batch=5,
 )
 mcdc.time_census(np.linspace(0.0, 20.0, 21)[1:], tally_frequency=1)
-"""
+
 mcdc.weight_window(
     x=np.linspace(-20.5, 20.5, 202),
     method="previous",
@@ -59,7 +59,7 @@ mcdc.weight_window(
     width=2.5,
     save_ww_data=True,
 )
-"""
+
 mcdc.population_control()
 # Run
 mcdc.run()
