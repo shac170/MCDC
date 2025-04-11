@@ -48,14 +48,14 @@ mcdc.setting(
     active_bank_buff=1e4,
     census_bank_buff=1e3,
     source_bank_buff=1e3,
-    N_batch=5,
+    N_batch=3,
 )
 mcdc.time_census(np.linspace(0.0, 20.0, 21)[1:], tally_frequency=1)
 
 mcdc.weight_window(
     x=np.linspace(-20.5, 20.5, 202),
     method="previous",
-    modifications=[["min-center", 1e-3]],
+    modifications=[["min-center", 1e-2]],
     width=2.5,
     save_ww_data=True,
 )
