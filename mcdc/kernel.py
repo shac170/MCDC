@@ -1,5 +1,5 @@
 import h5py, math, numba
-
+import scipy as sp
 from mpi4py import MPI
 from numba import (
     int64,
@@ -3695,6 +3695,7 @@ def ww_previous(data, mcdc):
     # accessing most recent tally dump
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
     Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
     Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
     Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
@@ -3719,7 +3720,17 @@ def ww_previous(data, mcdc):
             ax_expand.append(2)
         for ax in ax_expand:
             old_flux = np.expand_dims(old_flux, axis=ax)
+        if epsilon[WW_FILTER1] > 0:
+            old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
         center = old_flux
+        if mcdc["technique"]["ww"]["save"]:
+            f = h5py.File(
+                mcdc["setting"]["output_name"]
+                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                "a",
+            )
+            f.create_dataset("weight_windows/phi_tilde", data=center)
+            f.close()
     return center
 
 
@@ -3767,7 +3778,9 @@ def ww_alpha(data, mcdc):
             mcdc["setting"]["census_time"][idx_census]
             - mcdc["setting"]["census_time"][idx_census - 1]
         )
-
+        if epsilon[WW_FILTER1] > 0:
+            flux1 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux1)
+            flux2 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux2)
         # Computing alpha
         alpha = (1 / dt) * np.log(np.abs(flux1 / flux2) + 1e-2)
         alpha[flux2 == 0] = 1 / dt
@@ -3781,6 +3794,7 @@ def ww_alpha(data, mcdc):
                 + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
                 "a",
             )
+            f.create_dataset("weight_windows/phi_tilde", data=center)
             f.create_dataset("weight_windows/alpha", data=alpha)
             f.close()
     return center
@@ -3818,6 +3832,9 @@ def ww_dmd(data, mcdc):
                 flux = tally["flux"]["score"][-1]
             else:
                 flux = tally["flux"]["score"]
+
+            if epsilon[WW_FILTER1] > 0:
+                flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux)
 
             tally_shape = flux.shape
             snapshot = np.array(flux).flatten()
@@ -3858,7 +3875,34 @@ def ww_dmd(data, mcdc):
         for ax in ax_expand:
             center = np.expand_dims(center, axis=ax)
         f.close()
+        if mcdc["technique"]["ww"]["save"]:
+            f = h5py.File(
+                mcdc["setting"]["output_name"]
+                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                "a",
+            )
+            f.create_dataset("weight_windows/phi_tilde", data=center)
+            f.close()
     return center
+
+
+@njit
+def filter_data(w, k, data):
+    if w == 1:
+        return sp.ndimage.uniform_filter(data, k, mode="nearest")
+    elif w == 2:
+        freq_data = np.fft.fftn(data)
+        freq_grid = np.fft.fftfreq(data.shape[0])
+        if data.ndim > 1:
+            freq_grid = np.meshgrid(
+                *[np.fft.fftfreq(n) for n in data.shape], indexing="ij"
+            )
+            freq_grid = np.sqrt(sum(f**2 for f in freq_grid))
+        mask = freq_grid < (1 / k)
+        filtered_freq_data = freq_data * mask
+        return np.fft.ifftn(filtered_freq_data).real
+    else:
+        return data
 
 
 # =============================================================================
