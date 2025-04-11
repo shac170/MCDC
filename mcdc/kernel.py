@@ -3637,6 +3637,250 @@ def weight_window(P_arr, prog):
             P["w"] = w_target
 
 
+@njit
+def update_weight_windows(data, mcdc):
+
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    if mcdc["technique"]["ww"]["auto"] == WW_USER:
+        return
+    elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
+        center = ww_previous(data, mcdc)
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+
+    elif mcdc["technique"]["ww"]["auto"] == WW_ALPHA:
+        if idx_census > 0:
+            center = ww_alpha(data, mcdc)
+            mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+
+    elif mcdc["technique"]["ww"]["auto"] == WW_DMD:
+        if idx_census >= int(epsilon[WW_N_SNAP]) - 1:
+            center = ww_dmd(data, mcdc)
+            mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+
+    if epsilon[WW_WOLLABER1] > 0:
+        w_min = epsilon[WW_WOLLABER2]
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+            mcdc["technique"]["ww"]["center"][idx_census + 1]
+        ) * (
+            1
+            + (1 / epsilon[WW_WOLLABER1] - 1)
+            * np.exp(
+                -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
+                / epsilon[WW_WOLLABER1]
+            )
+        )
+    if epsilon[WW_MIN] > 0:
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+            mcdc["technique"]["ww"]["center"][idx_census + 1] * (1 - epsilon[WW_MIN])
+            + epsilon[WW_MIN]
+        )
+        arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                for k in range(arr.shape[2]):
+                    if arr[i, j, k] <= 0:
+                        arr[i, j, k] = epsilon[WW_MIN]
+
+    mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
+        mcdc["technique"]["ww"]["center"][idx_census + 1]
+    )
+    if mcdc["technique"]["ww"]["save"]:
+        with objmode():
+            f = h5py.File(
+                mcdc["setting"]["output_name"]
+                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                "a",
+            )
+            f.create_dataset(
+                "weight_windows/center",
+                data=mcdc["technique"]["ww"]["center"][idx_census + 1],
+            )
+            f.close()
+    return
+
+
+@njit
+def ww_previous(data, mcdc):
+    # accessing most recent tally dump
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+    Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
+    Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
+    with objmode(center="float64[:,:,:]"):
+        f = h5py.File(
+            mcdc["setting"]["output_name"]
+            + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+            "r",
+        )
+        tallies = f["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
+        if mcdc["setting"]["census_tally_frequency"] > 1:
+            old_flux = tallies["flux/score"][-1][()]
+        else:
+            old_flux = tallies["flux/score"][()]
+        f.close()
+        ax_expand = []
+        if Nx == 1:
+            ax_expand.append(0)
+        if Ny == 1:
+            ax_expand.append(1)
+        if Nz == 1:
+            ax_expand.append(2)
+        for ax in ax_expand:
+            old_flux = np.expand_dims(old_flux, axis=ax)
+        center = old_flux
+    return center
+
+
+@njit
+def ww_alpha(data, mcdc):
+    # accessing most recent tally dump
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    with objmode(center="float64[:,:,:]"):
+        f1 = h5py.File(
+            mcdc["setting"]["output_name"]
+            + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+            "r",
+        )
+        f2 = h5py.File(
+            mcdc["setting"]["output_name"]
+            + "-batch_%i-census_%i.h5" % (idx_batch, idx_census - 1),
+            "r",
+        )
+        tally1 = f1["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
+        tally2 = f2["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
+        if mcdc["setting"]["census_tally_frequency"] > 1:
+            flux1 = tally1["flux"]["score"][-1][()]
+            flux2 = tally2["flux"]["score"][-1][()]
+        else:
+            flux1 = tally1["flux"]["score"][()]
+            flux2 = tally2["flux"]["score"][()]
+
+        Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+        Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
+        Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
+
+        ax_expand = []
+        if Nx == 1:
+            ax_expand.append(0)
+        if Ny == 1:
+            ax_expand.append(1)
+        if Nz == 1:
+            ax_expand.append(2)
+        for ax in ax_expand:
+            flux1 = np.expand_dims(flux1, axis=ax)
+            flux2 = np.expand_dims(flux2, axis=ax)
+        dt = (
+            mcdc["setting"]["census_time"][idx_census]
+            - mcdc["setting"]["census_time"][idx_census - 1]
+        )
+
+        alpha = (1 / dt) * np.log(np.abs(flux1 / flux2) + 1e-2)
+        alpha[flux2 == 0] = 1 / dt
+        alpha[alpha > 3] = 2
+
+        center = flux1 * np.exp(alpha * dt)
+        f1.close()
+        if mcdc["technique"]["ww"]["save"]:
+            f = h5py.File(
+                mcdc["setting"]["output_name"]
+                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                "a",
+            )
+            f.create_dataset("weight_windows/alpha", data=alpha)
+            f.close()
+    return center
+
+
+@njit
+def ww_dmd(data, mcdc):
+    # accessing most recent tally dump
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    n_snapshot = int(epsilon[WW_N_SNAP])
+    snapshape = [n_snapshot]
+    Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+    if Nx > 1:
+        snapshape.append(Nx)
+    Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
+    if Ny > 1:
+        snapshape.append(Ny)
+    Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
+    if Nz > 1:
+        snapshape.append(Nz)
+
+    with objmode(center="float64[:,:,:]"):
+        snapshots = []
+        for n in range(n_snapshot):
+
+            f = h5py.File(
+                mcdc["setting"]["output_name"]
+                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census - n),
+                "r",
+            )
+            tally = f["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
+            if mcdc["setting"]["census_tally_frequency"] > 1:
+                flux = tally["flux"]["score"][-1]
+            else:
+                flux = tally["flux"]["score"]
+
+            tally_shape = flux.shape
+            snapshot = np.array(flux).flatten()
+            snapshots.append(snapshot)
+        snapshots = np.flip(np.array(snapshots).T, 1)
+        X1 = snapshots[:, :-1]
+        X2 = snapshots[:, 1:]
+        # Singular value decomposition of the first collection of snapshots
+        U, S, Vh = np.linalg.svd(X1, full_matrices=False)
+        N, M = snapshots.shape
+        Sinv = np.diag(1 / S)
+        r = 0
+        # truncation rank
+        if r == 0:
+            r = min(N, M)
+        U = U[:, :r]
+        Sinv = Sinv[:r, :r]
+        Vh = Vh[:r, :].conj().T
+
+        Atilde = U.conj().T @ X2 @ Vh @ Sinv
+
+        eigenvalues, eigenvectors = np.linalg.eig(Atilde)
+        PSI = X2 @ Vh @ Sinv @ eigenvectors
+        omega = np.log(np.abs(eigenvalues))
+        b = np.linalg.pinv(PSI) @ snapshots[:, M - 1]
+        new_data = np.real(PSI @ np.diag(np.exp(omega)) @ b)
+
+        center = np.reshape(new_data, tally_shape)
+
+        ax_expand = []
+        if Nx == 1:
+            ax_expand.append(0)
+        if Ny == 1:
+            ax_expand.append(1)
+        if Nz == 1:
+            ax_expand.append(2)
+        for ax in ax_expand:
+            center = np.expand_dims(center, axis=ax)
+        f.close()
+        """
+        if mcdc["technique"]["ww"]["save"]:
+            f = h5py.File(
+                mcdc["setting"]["output_name"]
+                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                "a",
+            )
+            f.create_dataset("weight_windows/alpha", data=alpha)
+            f.close()
+        """
+    return center
+
+
 # =============================================================================
 # Weight Roulette
 # =============================================================================
