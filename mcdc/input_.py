@@ -48,8 +48,6 @@ from mcdc.constant import (
     WW_WOLLABER1,
     WW_WOLLABER2,
     WW_N_SNAP,
-    WW_FILTER1,
-    WW_FILTER2,
 )
 from mcdc.print_ import print_error
 import mcdc.type_ as type_
@@ -1486,7 +1484,7 @@ def weight_window(
         mod_checked = check_support(
             "Weight window modification",
             mod[0],
-            ["min-center", "wollaber", "n-snapshot", "filter"],
+            ["min-center", "wollaber", "n-snapshot"],
         )
         if mod_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = mod[1]
@@ -1495,12 +1493,6 @@ def weight_window(
             card["ww"]["epsilon"][WW_WOLLABER2] = mod[2]
         if mod_checked == "n-snapshot":
             card["ww"]["epsilon"][WW_N_SNAP] = mod[1]
-        if mod_checked == "filter":
-            if mod[1] == "fourier":
-                card["ww"]["epsilon"][WW_FILTER1] = 2
-            else:
-                card["ww"]["epsilon"][WW_FILTER1] = 1
-            card["ww"]["epsilon"][WW_FILTER2] = mod[2]
 
     # Set mesh
     card["ww"]["mesh"]["x"] = x

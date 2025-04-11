@@ -1146,7 +1146,7 @@ def make_type_technique(input_deck):
     ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
-    ww_list += [("epsilon", float64, (6,))]
+    ww_list += [("epsilon", float64, (4,))]
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("save", bool_)]
     ww_list += [("tally_idx", int64)]

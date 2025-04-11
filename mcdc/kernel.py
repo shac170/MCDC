@@ -1896,6 +1896,7 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
         + iy * stride["y"]
         + iz * stride["z"]
     )
+
     # Sweep through the distance
     distance_swept = 0.0
     while distance_swept < distance - COINCIDENCE_TOLERANCE:
@@ -1945,8 +1946,6 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
         # Score
         flux = distance_scored * P["w"]
         mu = P["ux"]
-        P = P_arr[0]
-        P["t"] += distance / physics.get_speed(P_arr, mcdc)
         for i in range(tally["N_score"]):
             score_type = tally["scores"][i]
             score = 0
@@ -1960,6 +1959,22 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
             elif score_type == SCORE_FISSION:
                 SigmaF = get_MacroXS(XS_FISSION, material, P_arr, mcdc)
                 score = flux * SigmaF
+            if score_type == SCORE_NET_CURRENT:
+                score = flux * mu
+            if score_type == SCORE_MU_SQ:
+                score = flux * mu * mu
+            elif score_type == SCORE_TIME_MOMENT_FLUX:
+                score = flux * (t - (mesh["t"][it - 1] + mesh["t"][it]) / 2)
+            elif score_type == SCORE_SPACE_MOMENT_FLUX:
+                score = flux * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
+            elif score_type == SCORE_TIME_MOMENT_CURRENT:
+                score = flux * mu * (t - (mesh["t"][it - 1] + mesh["t"][it]) / 2)
+            elif score_type == SCORE_SPACE_MOMENT_CURRENT:
+                score = flux * mu * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
+            elif score_type == SCORE_TIME_MOMENT_MU_SQ:
+                score = flux * mu * mu * (t - (mesh["t"][it - 1] + mesh["t"][it]) / 2)
+            elif score_type == SCORE_SPACE_MOMENT_MU_SQ:
+                score = flux * mu * mu * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
             adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
 
         # Accumulate distance swept
@@ -2147,9 +2162,16 @@ def score_cs_tally(P_arr, distance, tally, data, mcdc):
 
     # Check each coarse bin
     for j in range(N_cs_bins):
-        center = np.array([cs_centers[0][j], cs_centers[1][j]])
-        start = np.array([x, y])
-        end = np.array([x_final, y_final])
+        center = adapt.local_array(2, type_.float64)
+        start = adapt.local_array(2, type_.float64)
+        end = adapt.local_array(2, type_.float64)
+        #
+        center[0] = cs_centers[0][j]
+        center[1] = cs_centers[1][j]
+        start[0] = x
+        start[1] = y
+        end[0] = x_final
+        end[1] = y_final
 
         distance_inside = calculate_distance_in_coarse_bin(
             start, end, distance, center, cs_bin_size
@@ -2157,12 +2179,17 @@ def score_cs_tally(P_arr, distance, tally, data, mcdc):
 
         # Last bin covers the whole problem
         if j == N_cs_bins - 1:
-            cs_bin_size_full_problem = np.array([INF, INF], dtype=np.float64)
+            cs_bin_size_full_problem = adapt.local_array(2, type_.float64)
+            cs_bin_size_full_problem[0] = INF
+            cs_bin_size_full_problem[1] = INF
             distance_inside = calculate_distance_in_coarse_bin(
                 start, end, distance, center, cs_bin_size_full_problem
             )
 
-        distance_in_bin = np.minimum(distance, distance_inside)  # this line is good
+        if distance < distance_inside:
+            distance_in_bin = distance
+        else:
+            distance_in_bin = distance_inside
 
         # Calculate flux and other scores
         flux = distance_in_bin * P["w"]
@@ -2228,11 +2255,16 @@ def cs_tracklength_in_box(start, end, x_min, x_max, y_min, y_max):
 
     # Update start and end points based on clipping results
     if t1 < 1:
-        end = start + t1 * np.array([dx, dy])
+        end[0] = start[0] + t1 * dx
+        end[1] = start[1] + t1 * dy
     if t0 > 0:
-        start = start + t0 * np.array([dx, dy])
+        start[0] = start[0] + t0 * dx
+        start[1] = start[1] + t0 * dx
 
-    return np.linalg.norm(end - start)
+    # Return the norm
+    X = end[0] - start[0]
+    Y = end[1] - start[1]
+    return math.sqrt(X**2 + Y**2)
 
 
 @njit
@@ -2279,35 +2311,6 @@ def dd_reduce(data, mcdc):
             if MPI.COMM_NULL != dd_comm:
                 dd_comm.Free()
 
-@njit
-def census_tally_reduce(data, mcdc):
-    tally_bin = data[TALLY]
-    N_bin = tally_bin.shape[1]
-
-    # Normalize
-    #N_particle = mcdc["setting"]["N_particle"]
-    #for i in range(N_bin):
-    #    tally_bin[TALLY_SUM][i] /= N_particle
-
-    if not mcdc["technique"]["domain_decomposition"]:
-        # MPI Reduce
-        buff1 = np.zeros_like(tally_bin[TALLY_SUM])
-        buff2 = np.zeros_like(tally_bin[TALLY_SUM_SQ])
-        with objmode():
-            MPI.COMM_WORLD.Reduce(tally_bin[TALLY_SUM], buff1, MPI.SUM, 0)
-            MPI.COMM_WORLD.Reduce(tally_bin[TALLY_SUM_SQ], buff2, MPI.SUM, 0)
-        tally_bin[TALLY_SUM][:] = buff1
-        tally_bin[TALLY_SUM_SQ][:] = buff2
-
-    else:
-        # find number of subdomains
-        N_dd = 1
-        N_dd *= mcdc["technique"]["dd_mesh"]["x"].size - 1
-        N_dd *= mcdc["technique"]["dd_mesh"]["y"].size - 1
-        N_dd *= mcdc["technique"]["dd_mesh"]["z"].size - 1
-        # DD Reduce if multiple processors per subdomain
-        if N_dd != mcdc["mpi_size"]:
-            dd_reduce(data, mcdc)
 
 @njit
 def tally_reduce(data, mcdc):
@@ -2345,8 +2348,8 @@ def tally_accumulate(data, mcdc):
     for i in range(N_bin):
         # Accumulate score and square of score into sum and sum_sq
         score = tally_bin[TALLY_SCORE, i]
-        tally_bin[TALLY_SUM, i] = score
-        tally_bin[TALLY_SUM_SQ, i] = score * score
+        tally_bin[TALLY_SUM, i] += score
+        tally_bin[TALLY_SUM_SQ, i] += score * score
 
         # Reset score bin
         tally_bin[TALLY_SCORE, i] = 0.0
@@ -3581,7 +3584,7 @@ def branchless_collision(P_arr, prog):
 
 
 # =============================================================================
-# Weight widow
+# Weight window
 # =============================================================================
 
 
@@ -3592,11 +3595,11 @@ def weight_window(P_arr, prog):
 
     # Get indices
     ix, iy, iz, it, outside = mesh_.structured.get_indices(
-        P_arr, mcdc["technique"]["ww_mesh"]
+        P_arr, mcdc["technique"]["ww"]["mesh"]
     )
 
     # Target weight
-    w_target = mcdc["technique"]["ww"][it, ix, iy, iz]
+    w_target = mcdc["technique"]["ww"]["center"][it, ix, iy, iz]
 
     # Population control factor
     w_target *= mcdc["technique"]["pc_factor"]
@@ -3605,7 +3608,7 @@ def weight_window(P_arr, prog):
     p = P["w"] / w_target
 
     # Window width
-    width = mcdc["technique"]["ww_width"]
+    width = mcdc["technique"]["ww"]["width"]
 
     P_new_arr = adapt.local_array(1, type_.particle_record)
 
@@ -3644,8 +3647,10 @@ def update_weight_windows(data, mcdc):
     idx_census = mcdc["idx_census"]
     center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
     epsilon = mcdc["technique"]["ww"]["epsilon"]
+
     if mcdc["technique"]["ww"]["auto"] == WW_USER:
         return
+
     elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
         center = ww_previous(data, mcdc)
         mcdc["technique"]["ww"]["center"][idx_census + 1] = center
@@ -3737,7 +3742,7 @@ def ww_previous(data, mcdc):
 
 @njit
 def ww_alpha(data, mcdc):
-    # accessing most recent tally dump
+    # accessing most recent two tally dumps
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
@@ -3780,6 +3785,7 @@ def ww_alpha(data, mcdc):
             - mcdc["setting"]["census_time"][idx_census - 1]
         )
 
+        # Computing alpha
         alpha = (1 / dt) * np.log(np.abs(flux1 / flux2) + 1e-2)
         alpha[flux2 == 0] = 1 / dt
         alpha[alpha > 3] = 2
@@ -3799,7 +3805,7 @@ def ww_alpha(data, mcdc):
 
 @njit
 def ww_dmd(data, mcdc):
-    # accessing most recent tally dump
+    # accessing snapshots
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
@@ -3834,6 +3840,8 @@ def ww_dmd(data, mcdc):
             snapshot = np.array(flux).flatten()
             snapshots.append(snapshot)
         snapshots = np.flip(np.array(snapshots).T, 1)
+
+        # Performing DMD
         X1 = snapshots[:, :-1]
         X2 = snapshots[:, 1:]
         # Singular value decomposition of the first collection of snapshots
@@ -3849,13 +3857,12 @@ def ww_dmd(data, mcdc):
         Vh = Vh[:r, :].conj().T
 
         Atilde = U.conj().T @ X2 @ Vh @ Sinv
-
         eigenvalues, eigenvectors = np.linalg.eig(Atilde)
         PSI = X2 @ Vh @ Sinv @ eigenvectors
         omega = np.log(np.abs(eigenvalues))
         b = np.linalg.pinv(PSI) @ snapshots[:, M - 1]
-        new_data = np.real(PSI @ np.diag(np.exp(omega)) @ b)
 
+        new_data = np.real(PSI @ np.diag(np.exp(omega)) @ b)
         center = np.reshape(new_data, tally_shape)
 
         ax_expand = []
@@ -3868,16 +3875,6 @@ def ww_dmd(data, mcdc):
         for ax in ax_expand:
             center = np.expand_dims(center, axis=ax)
         f.close()
-        """
-        if mcdc["technique"]["ww"]["save"]:
-            f = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "a",
-            )
-            f.create_dataset("weight_windows/alpha", data=alpha)
-            f.close()
-        """
     return center
 
 
