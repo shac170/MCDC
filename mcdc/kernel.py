@@ -1947,8 +1947,7 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
         mu = P["ux"]
         #print((t - (mesh["t"][it + 1] + mesh["t"][it]) / 2),t,(mesh["t"][it + 1]),(mesh["t"][it]))
         P = P_arr[0]
-        x1 = P["x"] + P["ux"] * distance_scored
-        x0 = P["x"]
+
         P["t"] += distance / physics.get_speed(P_arr, mcdc)
         for i in range(tally["N_score"]):
             score_type = tally["scores"][i]
@@ -1968,39 +1967,38 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
             elif score_type == SCORE_MU_SQ:
                 score = flux * mu * mu
             elif score_type == SCORE_TIME_MOMENT_FLUX:
-                score = flux * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
+                t1 = t+distance_scored*ut
+                score = P["w"] * (0.5 *(t1**2-t**2) -((mesh["t"][it + 1] + mesh["t"][it]) / 2)*(t1-t))
             elif score_type == SCORE_SPACE_MOMENT_FLUX:
-                #score = flux * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
-                score = P["w"]/ux * (0.5 *(x1**2-x0**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x0))
+                x1 = x+distance_scored*ux
+                score = P["w"]/ux * (0.5 *(x1**2-x**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x))
             elif score_type == SCORE_SPACE_TIME_MOMENT_FLUX:
-                score = (
-                    flux
-                    * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
-                    * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
-                )
+                t1 = t+distance_scored*ut
+                x1 = x+distance_scored*ux
+                score = P["w"]/ux * ((0.5 *(x1**2-x**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x))*
+                                     (0.5 *(t1**2-t**2) -((mesh["t"][it + 1] + mesh["t"][it]) / 2)*(t1-t)))
             elif score_type == SCORE_TIME_MOMENT_CURRENT:
-                score = flux * mu * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
+                t1 = t+distance_scored*ut
+                score = mu * P["w"] * (0.5 *(t1**2-t**2) -((mesh["t"][it + 1] + mesh["t"][it]) / 2)*(t1-t))
             elif score_type == SCORE_SPACE_MOMENT_CURRENT:
-                score = flux * mu * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
+                x1 = x+distance_scored*ux
+                score = mu * P["w"]/ux * (0.5 *(x1**2-x**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x))
             elif score_type == SCORE_SPACE_TIME_MOMENT_CURRENT:
-                score = (
-                    flux
-                    * mu
-                    * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
-                    * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
-                )
+                t1 = t+distance_scored*ut
+                x1 = x+distance_scored*ux
+                score = mu*P["w"]/ux * ((0.5 *(x1**2-x**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x))*
+                                     (0.5 *(t1**2-t**2) -((mesh["t"][it + 1] + mesh["t"][it]) / 2)*(t1-t)))
             elif score_type == SCORE_TIME_MOMENT_MU_SQ:
-                score = flux * mu * mu * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
+                t1 = t+distance_scored*ut
+                score = mu*mu * P["w"] * (0.5 *(t1**2-t**2) -((mesh["t"][it + 1] + mesh["t"][it]) / 2)*(t1-t))
             elif score_type == SCORE_SPACE_MOMENT_MU_SQ:
-                score = flux * mu * mu * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
+                x1 = x+distance_scored*ux
+                score = mu*mu * P["w"]/ux * (0.5 *(x1**2-x**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x))
             elif score_type == SCORE_SPACE_TIME_MOMENT_MU_SQ:
-                score = (
-                    flux
-                    * mu
-                    * mu
-                    * (x - (mesh["x"][ix + 1] + mesh["x"][ix]) / 2)
-                    * (t - (mesh["t"][it + 1] + mesh["t"][it]) / 2)
-                )
+                t1 = t+distance_scored*ut
+                x1 = x+distance_scored*ux
+                score = mu*mu*P["w"]/ux * ((0.5 *(x1**2-x**2) -((mesh["x"][ix + 1] + mesh["x"][ix]) / 2)*(x1-x))*
+                                     (0.5 *(t1**2-t**2) -((mesh["t"][it + 1] + mesh["t"][it]) / 2)*(t1-t)))
             adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
 
         # Accumulate distance swept
