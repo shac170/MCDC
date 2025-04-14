@@ -2345,7 +2345,7 @@ def recombine_tallies(file="output.h5"):
                 f.create_dataset(
                     "tallies/" + tally_info[0] + "/grid/g", data=grid["g"][()]
                 )
-
+        f.close()
         # Save weight window data
         weight_window_save = {}
         for i_census in range(N_census):
