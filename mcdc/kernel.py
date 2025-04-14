@@ -2344,15 +2344,15 @@ def census_based_tally_output(data, mcdc):
     idx_census = mcdc["idx_census"]
     tally_bin = data[TALLY]
     N_bin = tally_bin.shape[1]
-    if mcdc["setting"]["N_batch"] > 1:
-        for i in range(N_bin):
-            # Store score and square of score
-            score = tally_bin[TALLY_SCORE, i]
-            tally_bin[TALLY_SUM, i] = score
-            tally_bin[TALLY_SUM_SQ, i] = score * score
 
-            # Reset score bin
-            tally_bin[TALLY_SCORE, i] = 0.0
+    for i in range(N_bin):
+        # Store score and square of score
+        score = tally_bin[TALLY_SCORE, i]
+        tally_bin[TALLY_SUM, i] = score
+        tally_bin[TALLY_SUM_SQ, i] = score * score
+
+        # Reset score bin
+        tally_bin[TALLY_SCORE, i] = 0.0
 
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         mesh = tally["filter"]
@@ -2443,9 +2443,6 @@ def census_based_tally_output(data, mcdc):
                     uq_var = tot_var - mc_var
                     f.create_dataset(group_name + "uq_var", data=uq_var)
             f.close()
-    #tally_bin[i][TALLY_SUM][:] = 0.0
-    #tally_bin[i][TALLY_SUM_SQ][:] = 0.0
-
 
 @njit
 def dd_closeout(data, mcdc):
