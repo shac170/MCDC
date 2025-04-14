@@ -1334,7 +1334,9 @@ def weight_window(
 
     """
 
-    t = global_.input_deck.setting["census_time"]
+    census_t = global_.input_deck.setting["census_time"]
+    t = np.zeros(len(census_t)+1)
+    t[1:] = census_t
     card = global_.input_deck.technique
     card["weight_window"] = True
     N_update = 0
