@@ -2329,7 +2329,7 @@ def tally_accumulate(data, mcdc):
     N_bin = tally_bin.shape[1]
 
     for i in range(N_bin):
-        # score and square of score into sum and sum_sq
+        # Accumulate score and square of score into sum and sum_sq
         score = tally_bin[TALLY_SCORE, i]
         tally_bin[TALLY_SUM, i] += score
         tally_bin[TALLY_SUM_SQ, i] += score * score
@@ -2443,6 +2443,7 @@ def census_based_tally_output(data, mcdc):
                     uq_var = tot_var - mc_var
                     f.create_dataset(group_name + "uq_var", data=uq_var)
             f.close()
+
 
 @njit
 def dd_closeout(data, mcdc):

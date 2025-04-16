@@ -2269,7 +2269,6 @@ def recombine_tallies1(file="output.h5"):
                 Nmu = len(grid["mu"][()]) - 1
                 N_azi = len(grid["azi"][()]) - 1
                 Ng = len(grid["g"][()]) - 1
-
                 # Creating structure of correct size to hold combined tally
                 for tally_type in tally_info[1:]:
                     tally_score = np.zeros(
@@ -2277,6 +2276,7 @@ def recombine_tallies1(file="output.h5"):
                     )
                     tally_score = np.squeeze(tally_score)
                     tally_score_sq = np.zeros_like(tally_score)
+
                     for i_census in range(N_census):
                         for i_batch in range(N_batch):
                             with h5py.File(
@@ -2310,14 +2310,12 @@ def recombine_tallies1(file="output.h5"):
                                 ] += (
                                     score_sq
                                 )
-
                     tally_score /= N_batch
                     if N_batch > 1:
                         tally_score_sq = np.sqrt(
                             (tally_score_sq / N_batch - np.square(tally_score))
                             / (N_batch - 1)
                         )
-
                     f.create_dataset(
                         "tallies/" + tally_info[0] + "/" + tally_type + "/mean",
                         data=tally_score,
@@ -2326,7 +2324,6 @@ def recombine_tallies1(file="output.h5"):
                         "tallies/" + tally_info[0] + "/" + tally_type + "/sdev",
                         data=tally_score_sq,
                     )
-
                 f.create_dataset(
                     "tallies/" + tally_info[0] + "/grid/x", data=grid["x"][()]
                 )
@@ -2346,7 +2343,7 @@ def recombine_tallies1(file="output.h5"):
                 f.create_dataset(
                     "tallies/" + tally_info[0] + "/grid/g", data=grid["g"][()]
                 )
-        f.close()
+            f.close()
         # Save weight window data
         weight_window_save = {}
         for i_census in range(N_census):
@@ -2434,14 +2431,20 @@ def recombine_tallies(file="output.h5"):
                                     batch_data[score+"_sq"] = tally_data["score_sq"]/N_batch
                                 else:
                                     batch_data[score+"_sq"] += tally_data["score_sq"]/N_batch
-                                            
+                                    
+                        if len(batch_data[score].shape) == 1:
+                            batch_data[score] = np.array([batch_data[score],] )                                                            
+                            batch_data[score+"_sq"] = np.array([batch_data[score+"_sq"],])            
+                            
                         if score not in tally_save:
                             tally_save[score] = []
                         if score+"_sq" not in tally_save:
                             tally_save[score+"_sq"] = []
-                        tally_save[score].append(batch_data[score])
-                        tally_save[score+"_sq"].append(batch_data[score+"_sq"])
-                        
+
+                        for idx_layer in range(batch_data[score].shape[0]):
+                            tally_save[score].append(batch_data[score][idx_layer])
+                            tally_save[score+"_sq"].append(batch_data[score+"_sq"][idx_layer])
+                            
                     f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/"+score+"/mean", data=tally_save[score])
                     f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/"+score+"/sdev", data=tally_save[score+"_sq"])
                     f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/azi", data=azi)
@@ -2491,8 +2494,7 @@ def recombine_tallies(file="output.h5"):
                     + str(i_census)
                     + ".h5"
                 )
-                pass
-                #os.system("rm " + file_name)
+                os.system("rm " + file_name)
 
 
 def closeout(mcdc):
