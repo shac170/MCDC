@@ -2215,7 +2215,7 @@ def generate_hdf5(data, mcdc):
                 f.create_dataset("particles_size", data=len(neutrons[:]))
 
 
-def recombine_tallies(file="output.h5"):
+def recombine_tallies1(file="output.h5"):
     if MPI.COMM_WORLD.Get_rank() == 0:
         # Load main output file and read input params
         with h5py.File(file, "r") as f:
@@ -2224,6 +2224,7 @@ def recombine_tallies(file="output.h5"):
             N_census = f["input_deck/setting/N_census"][()] - 1
             N_batch = f["input_deck/setting/N_batch"][()]
             N_tallies = f["input_deck/setting/census_tally_frequency"][()]
+            mesh_tallies = f["input_deck/mesh_tallies"]
         f.close()
         # Combine the tally output into a single file
 
@@ -2387,6 +2388,111 @@ def recombine_tallies(file="output.h5"):
                     + ".h5"
                 )
                 os.system("rm " + file_name)
+
+def recombine_tallies(file="output.h5"):
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        # Load main output file and read input params
+        with h5py.File(file, "a") as f:
+            output_name = str(f["input_deck/setting/output_name"][()])[2:-1]
+            N_particle = f["input_deck/setting/N_particle"][()]
+            N_census = f["input_deck/setting/N_census"][()] - 1
+            N_batch = f["input_deck/setting/N_batch"][()]
+            N_tallies = f["input_deck/setting/census_tally_frequency"][()]
+            mesh_tallies = f["input_deck/mesh_tallies"]
+            
+            # Combine the tally output into a single file
+            for idx_tally, mesh_tally in enumerate(mesh_tallies):
+                tally_save = {}
+                azi = f["input_deck/mesh_tallies"][mesh_tally]["azi"]
+                g = f["input_deck/mesh_tallies"][mesh_tally]["g"]
+                mu = f["input_deck/mesh_tallies"][mesh_tally]["mu"]
+                x = f["input_deck/mesh_tallies"][mesh_tally]["x"]
+                y = f["input_deck/mesh_tallies"][mesh_tally]["y"]
+                z = f["input_deck/mesh_tallies"][mesh_tally]["z"]
+                t = []
+                for score1  in mesh_tallies[mesh_tally]["scores"]:
+                    score = score1.decode('utf-8')
+                    for i_census in range(N_census):
+                        batch_data = {}
+                        for i_batch in range(N_batch):  
+                            with h5py.File(
+                                output_name + "-batch_%i-census_%i.h5" % (i_batch, i_census),
+                                "r",
+                            ) as f1: 
+                                "tallies/"+mesh_tally+"/"+score
+                                tally_data = f1["tallies"]["mesh_tally_"+str(idx_tally)][score]
+                                census_t = f1["tallies"]["mesh_tally_"+str(idx_tally)]["grid"]["t"][()]
+                                for time in census_t:
+                                    if time not in t:
+                                        t.append(time)
+                                if score not in batch_data:
+                                    batch_data[score] = tally_data["score"]/N_batch
+                                else:
+                                    batch_data[score] += tally_data["score"]/N_batch
+
+                                if score+"_sq" not in batch_data:
+                                    batch_data[score+"_sq"] = tally_data["score_sq"]/N_batch
+                                else:
+                                    batch_data[score+"_sq"] += tally_data["score_sq"]/N_batch
+                                            
+                        if score not in tally_save:
+                            tally_save[score] = []
+                        if score+"_sq" not in tally_save:
+                            tally_save[score+"_sq"] = []
+                        tally_save[score].append(batch_data[score])
+                        tally_save[score+"_sq"].append(batch_data[score+"_sq"])
+                        
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/"+score+"/mean", data=tally_save[score])
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/"+score+"/sdev", data=tally_save[score+"_sq"])
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/azi", data=azi)
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/g", data=g)
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/mu", data=mu)
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/t", data=t)
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/x", data=x)
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/y", data=y)
+                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/z", data=z)
+        # Save weight window data
+        weight_window_save = {}
+        for i_census in range(N_census):
+            batch_data = {}
+            for i_batch in range(N_batch):
+                with h5py.File(
+                    output_name + "-batch_%i-census_%i.h5" % (i_batch, i_census),
+                    "r",
+                ) as f1:
+
+                    if "weight_windows" in f1:
+                        for key in f1["weight_windows"]:
+                            data = f1["weight_windows"][key][()]
+    
+                            if key not in batch_data:
+                                batch_data[key] = data
+                            else:
+                                batch_data[key] += data
+
+            if N_batch > 0:
+                for key in batch_data:
+                    batch_data[key] /= N_batch
+                    if key not in weight_window_save:
+                        weight_window_save[key] = []
+                    weight_window_save[key].append(batch_data[key])
+
+        with h5py.File(output_name + ".h5", "a") as f:
+            for key in weight_window_save:
+                f.create_dataset("weight_windows/" + key, data=weight_window_save[key])
+
+        for i_census in range(N_census):
+            for i_batch in range(N_batch):
+                file_name = (
+                    output_name
+                    + "-batch_"
+                    + str(i_batch)
+                    + "-census_"
+                    + str(i_census)
+                    + ".h5"
+                )
+                pass
+                #os.system("rm " + file_name)
 
 
 def closeout(mcdc):
