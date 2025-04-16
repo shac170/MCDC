@@ -2381,11 +2381,6 @@ def census_based_tally_output(data, mcdc):
                     + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
                     "w",
                 )
-                f.create_dataset(
-                    "weight_windows/particle_density",
-                    data=tally_density(mcdc, data),
-                )
-
             else:
                 f = h5py.File(
                     mcdc["setting"]["output_name"]
@@ -3630,7 +3625,7 @@ def weight_window(P_arr, prog):
 def update_weight_windows(data, mcdc):
 
     idx_batch = mcdc["idx_batch"]
-    idx_census = mcdc["idx_census"] 
+    idx_census = mcdc["idx_census"]
     center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
     epsilon = mcdc["technique"]["ww"]["epsilon"]
     if mcdc["technique"]["ww"]["auto"] == WW_USER:
@@ -3711,9 +3706,9 @@ def ww_previous(data, mcdc):
         dx = x[1:] - x[:-1]
         dt = t[1] - t[0]
         if mcdc["setting"]["census_tally_frequency"] > 1:
-            old_flux = tallies["flux/score"][-1][()]/(dx*dt)
+            old_flux = tallies["flux/score"][-1][()] / (dx * dt)
         else:
-            old_flux = tallies["flux/score"][()]/(dx*dt)
+            old_flux = tallies["flux/score"][()] / (dx * dt)
         f.close()
         ax_expand = []
         if Nx == 1:
@@ -3756,18 +3751,22 @@ def ww_alpha(data, mcdc):
                 + "-batch_%i-census_%i.h5" % (idx_batch, idx_census - 1),
                 "r",
             )
-            tally1 = f1["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
-            tally2 = f2["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
+            tally1 = f1[
+                "tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])
+            ]
+            tally2 = f2[
+                "tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])
+            ]
             x = tally1["grid"]["x"]
             t = tally1["grid"]["t"]
             dx = x[1:] - x[:-1]
             dt = t[1] - t[0]
             if mcdc["setting"]["census_tally_frequency"] > 1:
-                flux1 = tally1["flux"]["score"][-1][()]/(dx*dt)
-                flux2 = tally2["flux"]["score"][-1][()]/(dx*dt)
+                flux1 = tally1["flux"]["score"][-1][()] / (dx * dt)
+                flux2 = tally2["flux"]["score"][-1][()] / (dx * dt)
             else:
-                flux1 = tally1["flux"]["score"][()]/(dx*dt)
-                flux2 = tally2["flux"]["score"][()]/(dx*dt)
+                flux1 = tally1["flux"]["score"][()] / (dx * dt)
+                flux2 = tally2["flux"]["score"][()] / (dx * dt)
 
             Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
             Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
@@ -3840,15 +3839,17 @@ def ww_dmd(data, mcdc):
                     + "-batch_%i-census_%i.h5" % (idx_batch, idx_census - n),
                     "r",
                 )
-                tally = f["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
+                tally = f[
+                    "tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])
+                ]
                 x = tally["grid"]["x"]
                 t = tally["grid"]["t"]
                 dx = x[1:] - x[:-1]
                 dt = t[1] - t[0]
                 if mcdc["setting"]["census_tally_frequency"] > 1:
-                    flux = tally["flux"]["score"][-1]/(dx*dt)
+                    flux = tally["flux"]["score"][-1] / (dx * dt)
                 else:
-                    flux = tally["flux"]["score"]/(dx*dt)
+                    flux = tally["flux"]["score"] / (dx * dt)
 
                 if epsilon[WW_FILTER1] > 0:
                     flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux)
@@ -3922,7 +3923,8 @@ def filter_data(w, k, data):
         return np.fft.ifftn(filtered_freq_data).real
     else:
         return data
-    
+
+
 def tally_density(mcdc, data):
     bank = mcdc["bank_source"]
     mesh = mcdc["mesh_tallies"][mcdc["technique"]["ww"]["tally_idx"]]["filter"]
@@ -3937,8 +3939,9 @@ def tally_density(mcdc, data):
         # input()
         # Get starting indices
         ix, iy, iz, it, outside = mesh_.structured.get_indices(P_arr, mesh)
-        tally[ix, iy, iz] += 1/dx[ix]
+        tally[ix, iy, iz] += 1 / dx[ix]
     return np.squeeze(tally)
+
 
 # =============================================================================
 # Weight Roulette

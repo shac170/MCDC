@@ -2215,177 +2215,6 @@ def generate_hdf5(data, mcdc):
                 f.create_dataset("particles_size", data=len(neutrons[:]))
 
 
-def recombine_tallies1(file="output.h5"):
-    if MPI.COMM_WORLD.Get_rank() == 0:
-        # Load main output file and read input params
-        with h5py.File(file, "r") as f:
-            output_name = str(f["input_deck/setting/output_name"][()])[2:-1]
-            N_particle = f["input_deck/setting/N_particle"][()]
-            N_census = f["input_deck/setting/N_census"][()] - 1
-            N_batch = f["input_deck/setting/N_batch"][()]
-            N_tallies = f["input_deck/setting/census_tally_frequency"][()]
-            mesh_tallies = f["input_deck/mesh_tallies"]
-        f.close()
-        # Combine the tally output into a single file
-
-        collected_tallies = []
-        collected_tally_names = []
-        # Collecting info on number and types of tallies
-        for i_census in range(N_census):
-            for i_batch in range(N_batch):
-                with h5py.File(
-                    output_name + "-batch_%i-census_%i.h5" % (i_batch, i_census), "r"
-                ) as f:
-                    tallies = f["tallies"]
-
-                    for tally in tallies:
-                        if tally not in collected_tally_names:
-                            grid = tallies[tally]["grid"]
-                            tally_list = [tally]
-                            for tally_type in tallies[tally]:
-                                if tally_type != "grid":
-                                    tally_list.append(tally_type)
-                            collected_tallies.append(tally_list)
-                            collected_tally_names.append(tally)
-                f.close()
-
-        for i, tally_info in enumerate(collected_tallies):
-            tally_grid_type = tally_info[0].split("_")[0]
-            tally_number = tally_info[0].split("_")[-1]
-            with h5py.File(output_name + ".h5", "a") as f:
-                grid = f[
-                    "input_deck/"
-                    + tally_grid_type
-                    + "_tallies/"
-                    + tally_grid_type
-                    + "_tallies_"
-                    + tally_number
-                ]
-                t_final = f["input_deck/setting/census_time"][()][-2]
-                t = np.linspace(0, t_final, N_census * N_tallies + 1)
-                Nx = len(grid["x"][()]) - 1
-                Ny = len(grid["y"][()]) - 1
-                Nz = len(grid["z"][()]) - 1
-                Nmu = len(grid["mu"][()]) - 1
-                N_azi = len(grid["azi"][()]) - 1
-                Ng = len(grid["g"][()]) - 1
-                # Creating structure of correct size to hold combined tally
-                for tally_type in tally_info[1:]:
-                    tally_score = np.zeros(
-                        (N_census * N_tallies, Nx, Ny, Nz, Nmu, N_azi, Ng)
-                    )
-                    tally_score = np.squeeze(tally_score)
-                    tally_score_sq = np.zeros_like(tally_score)
-
-                    for i_census in range(N_census):
-                        for i_batch in range(N_batch):
-                            with h5py.File(
-                                output_name
-                                + "-batch_%i-census_%i.h5" % (i_batch, i_census),
-                                "r",
-                            ) as f1:
-                                score = f1[
-                                    "tallies/"
-                                    + tally_info[0]
-                                    + "/"
-                                    + tally_type
-                                    + "/score"
-                                ][:]
-                                score_sq = f1[
-                                    "tallies/"
-                                    + tally_info[0]
-                                    + "/"
-                                    + tally_type
-                                    + "/score_sq"
-                                ][:]
-                                tally_score[
-                                    N_tallies * i_census : N_tallies * i_census
-                                    + N_tallies,
-                                    :,
-                                ] += score
-                                tally_score_sq[
-                                    N_tallies * i_census : N_tallies * i_census
-                                    + N_tallies,
-                                    :,
-                                ] += (
-                                    score_sq
-                                )
-                    tally_score /= N_batch
-                    if N_batch > 1:
-                        tally_score_sq = np.sqrt(
-                            (tally_score_sq / N_batch - np.square(tally_score))
-                            / (N_batch - 1)
-                        )
-                    f.create_dataset(
-                        "tallies/" + tally_info[0] + "/" + tally_type + "/mean",
-                        data=tally_score,
-                    )
-                    f.create_dataset(
-                        "tallies/" + tally_info[0] + "/" + tally_type + "/sdev",
-                        data=tally_score_sq,
-                    )
-                f.create_dataset(
-                    "tallies/" + tally_info[0] + "/grid/x", data=grid["x"][()]
-                )
-                f.create_dataset(
-                    "tallies/" + tally_info[0] + "/grid/y", data=grid["y"][()]
-                )
-                f.create_dataset(
-                    "tallies/" + tally_info[0] + "/grid/z", data=grid["z"][()]
-                )
-                f.create_dataset("tallies/" + tally_info[0] + "/grid/t", data=t)
-                f.create_dataset(
-                    "tallies/" + tally_info[0] + "/grid/mu", data=grid["mu"][()]
-                )
-                f.create_dataset(
-                    "tallies/" + tally_info[0] + "/grid/azi", data=grid["azi"][()]
-                )
-                f.create_dataset(
-                    "tallies/" + tally_info[0] + "/grid/g", data=grid["g"][()]
-                )
-            f.close()
-        # Save weight window data
-        weight_window_save = {}
-        for i_census in range(N_census):
-            batch_data = {}
-            for i_batch in range(N_batch):
-                with h5py.File(
-                    output_name + "-batch_%i-census_%i.h5" % (i_batch, i_census),
-                    "r",
-                ) as f1:
-
-                    if "weight_windows" in f1:
-                        for key in f1["weight_windows"]:
-                            data = f1["weight_windows"][key][()]
-    
-                            if key not in batch_data:
-                                batch_data[key] = data
-                            else:
-                                batch_data[key] += data
-
-            if N_batch > 0:
-                for key in batch_data:
-                    batch_data[key] /= N_batch
-                    if key not in weight_window_save:
-                        weight_window_save[key] = []
-                    weight_window_save[key].append(batch_data[key])
-
-        with h5py.File(output_name + ".h5", "a") as f:
-            for key in weight_window_save:
-                f.create_dataset("weight_windows/" + key, data=weight_window_save[key])
-
-        for i_census in range(N_census):
-            for i_batch in range(N_batch):
-                file_name = (
-                    output_name
-                    + "-batch_"
-                    + str(i_batch)
-                    + "-census_"
-                    + str(i_census)
-                    + ".h5"
-                )
-                os.system("rm " + file_name)
-
 def recombine_tallies(file="output.h5"):
     if MPI.COMM_WORLD.Get_rank() == 0:
         # Load main output file and read input params
@@ -2396,7 +2225,7 @@ def recombine_tallies(file="output.h5"):
             N_batch = f["input_deck/setting/N_batch"][()]
             N_tallies = f["input_deck/setting/census_tally_frequency"][()]
             mesh_tallies = f["input_deck/mesh_tallies"]
-            
+
             # Combine the tally output into a single file
             for idx_tally, mesh_tally in enumerate(mesh_tallies):
                 tally_save = {}
@@ -2407,53 +2236,92 @@ def recombine_tallies(file="output.h5"):
                 y = f["input_deck/mesh_tallies"][mesh_tally]["y"]
                 z = f["input_deck/mesh_tallies"][mesh_tally]["z"]
                 t = []
-                for score1  in mesh_tallies[mesh_tally]["scores"]:
-                    score = score1.decode('utf-8')
+                for score1 in mesh_tallies[mesh_tally]["scores"]:
+                    score = score1.decode("utf-8")
                     for i_census in range(N_census):
                         batch_data = {}
-                        for i_batch in range(N_batch):  
+                        for i_batch in range(N_batch):
                             with h5py.File(
-                                output_name + "-batch_%i-census_%i.h5" % (i_batch, i_census),
+                                output_name
+                                + "-batch_%i-census_%i.h5" % (i_batch, i_census),
                                 "r",
-                            ) as f1: 
-                                "tallies/"+mesh_tally+"/"+score
-                                tally_data = f1["tallies"]["mesh_tally_"+str(idx_tally)][score]
-                                census_t = f1["tallies"]["mesh_tally_"+str(idx_tally)]["grid"]["t"][()]
+                            ) as f1:
+                                "tallies/" + mesh_tally + "/" + score
+                                tally_data = f1["tallies"][
+                                    "mesh_tally_" + str(idx_tally)
+                                ][score]
+                                census_t = f1["tallies"][
+                                    "mesh_tally_" + str(idx_tally)
+                                ]["grid"]["t"][()]
                                 for time in census_t:
                                     if time not in t:
                                         t.append(time)
                                 if score not in batch_data:
-                                    batch_data[score] = tally_data["score"]/N_batch
+                                    batch_data[score] = tally_data["score"] / N_batch
                                 else:
-                                    batch_data[score] += tally_data["score"]/N_batch
+                                    batch_data[score] += tally_data["score"] / N_batch
 
-                                if score+"_sq" not in batch_data:
-                                    batch_data[score+"_sq"] = tally_data["score_sq"]/N_batch
+                                if score + "_sq" not in batch_data:
+                                    batch_data[score + "_sq"] = (
+                                        tally_data["score_sq"] / N_batch
+                                    )
                                 else:
-                                    batch_data[score+"_sq"] += tally_data["score_sq"]/N_batch
-                                    
+                                    batch_data[score + "_sq"] += (
+                                        tally_data["score_sq"] / N_batch
+                                    )
+
                         if len(batch_data[score].shape) == 1:
-                            batch_data[score] = np.array([batch_data[score],] )                                                            
-                            batch_data[score+"_sq"] = np.array([batch_data[score+"_sq"],])            
-                            
+                            batch_data[score] = np.array(
+                                [
+                                    batch_data[score],
+                                ]
+                            )
+                            batch_data[score + "_sq"] = np.array(
+                                [
+                                    batch_data[score + "_sq"],
+                                ]
+                            )
+
                         if score not in tally_save:
                             tally_save[score] = []
-                        if score+"_sq" not in tally_save:
-                            tally_save[score+"_sq"] = []
+                        if score + "_sq" not in tally_save:
+                            tally_save[score + "_sq"] = []
 
                         for idx_layer in range(batch_data[score].shape[0]):
                             tally_save[score].append(batch_data[score][idx_layer])
-                            tally_save[score+"_sq"].append(batch_data[score+"_sq"][idx_layer])
-                            
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/"+score+"/mean", data=tally_save[score])
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/"+score+"/sdev", data=tally_save[score+"_sq"])
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/azi", data=azi)
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/g", data=g)
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/mu", data=mu)
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/t", data=t)
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/x", data=x)
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/y", data=y)
-                    f.create_dataset("tallies/mesh_tally_"+str(idx_tally)+"/grid/z", data=z)
+                            tally_save[score + "_sq"].append(
+                                batch_data[score + "_sq"][idx_layer]
+                            )
+
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/" + score + "/mean",
+                        data=tally_save[score],
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/" + score + "/sdev",
+                        data=tally_save[score + "_sq"],
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/azi", data=azi
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/g", data=g
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/mu", data=mu
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/t", data=t
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/x", data=x
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/y", data=y
+                    )
+                    f.create_dataset(
+                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/z", data=z
+                    )
         # Save weight window data
         weight_window_save = {}
         for i_census in range(N_census):
@@ -2467,7 +2335,7 @@ def recombine_tallies(file="output.h5"):
                     if "weight_windows" in f1:
                         for key in f1["weight_windows"]:
                             data = f1["weight_windows"][key][()]
-    
+
                             if key not in batch_data:
                                 batch_data[key] = data
                             else:
