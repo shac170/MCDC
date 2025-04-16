@@ -1945,10 +1945,7 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
         # Score
         flux = distance_scored * P["w"]
         mu = P["ux"]
-        # print((t - (mesh["t"][it + 1] + mesh["t"][it]) / 2),t,(mesh["t"][it + 1]),(mesh["t"][it]))
-        P = P_arr[0]
 
-        P["t"] += distance / physics.get_speed(P_arr, mcdc)
         for i in range(tally["N_score"]):
             score_type = tally["scores"][i]
             score = 0
