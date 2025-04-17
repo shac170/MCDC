@@ -3627,69 +3627,71 @@ def weight_window(P_arr, prog):
 
 @njit
 def update_weight_windows(data, mcdc):
-    MPI.COMM_WORLD.Barrier()
-    turn = 0
-    while allreduce(turn) != MPI.COMM_WORLD.Get_rank():   
-        pass
-    idx_batch = mcdc["idx_batch"]
-    idx_census = mcdc["idx_census"]
-    center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
-    epsilon = mcdc["technique"]["ww"]["epsilon"]
-    if mcdc["technique"]["ww"]["auto"] == WW_USER:
-        return
+    size = MPI.COMM_WORLD.Get_size()
+    rank = MPI.COMM_WORLD.Get_rank()
+    for i in range(size):
+        if i == rank:
+        
+            idx_batch = mcdc["idx_batch"]
+            idx_census = mcdc["idx_census"]
+            center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
+            epsilon = mcdc["technique"]["ww"]["epsilon"]
+            if mcdc["technique"]["ww"]["auto"] == WW_USER:
+                return
 
-    elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
-        center = ww_previous(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+            elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
+                center = ww_previous(data, mcdc)
+                mcdc["technique"]["ww"]["center"][idx_census + 1] = center
 
-    elif mcdc["technique"]["ww"]["auto"] == WW_ALPHA:
-        center = ww_alpha(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+            elif mcdc["technique"]["ww"]["auto"] == WW_ALPHA:
+                center = ww_alpha(data, mcdc)
+                mcdc["technique"]["ww"]["center"][idx_census + 1] = center
 
-    elif mcdc["technique"]["ww"]["auto"] == WW_DMD:
-        center = ww_dmd(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+            elif mcdc["technique"]["ww"]["auto"] == WW_DMD:
+                center = ww_dmd(data, mcdc)
+                mcdc["technique"]["ww"]["center"][idx_census + 1] = center
 
-    if epsilon[WW_WOLLABER1] > 0:
-        w_min = epsilon[WW_WOLLABER2]
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-            mcdc["technique"]["ww"]["center"][idx_census + 1]
-        ) * (
-            1
-            + (1 / epsilon[WW_WOLLABER1] - 1)
-            * np.exp(
-                -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
-                / epsilon[WW_WOLLABER1]
+            if epsilon[WW_WOLLABER1] > 0:
+                w_min = epsilon[WW_WOLLABER2]
+                mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+                    mcdc["technique"]["ww"]["center"][idx_census + 1]
+                ) * (
+                    1
+                    + (1 / epsilon[WW_WOLLABER1] - 1)
+                    * np.exp(
+                        -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
+                        / epsilon[WW_WOLLABER1]
+                    )
+                )
+            if epsilon[WW_MIN] > 0:
+                mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+                    mcdc["technique"]["ww"]["center"][idx_census + 1] * (1 - epsilon[WW_MIN])
+                    + epsilon[WW_MIN]
+                )
+                arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
+                for i in range(arr.shape[0]):
+                    for j in range(arr.shape[1]):
+                        for k in range(arr.shape[2]):
+                            if arr[i, j, k] <= 0:
+                                arr[i, j, k] = epsilon[WW_MIN]
+
+            mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
+                mcdc["technique"]["ww"]["center"][idx_census + 1]
             )
-        )
-    if epsilon[WW_MIN] > 0:
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-            mcdc["technique"]["ww"]["center"][idx_census + 1] * (1 - epsilon[WW_MIN])
-            + epsilon[WW_MIN]
-        )
-        arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
-        for i in range(arr.shape[0]):
-            for j in range(arr.shape[1]):
-                for k in range(arr.shape[2]):
-                    if arr[i, j, k] <= 0:
-                        arr[i, j, k] = epsilon[WW_MIN]
-
-    mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
-        mcdc["technique"]["ww"]["center"][idx_census + 1]
-    )
-    if mcdc["technique"]["ww"]["save"]:
-        with objmode():
-            f = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "a",
-            )
-            f.create_dataset(
-                "weight_windows/center",
-                data=mcdc["technique"]["ww"]["center"][idx_census + 1],
-            )
-            f.close()
-    turn = 1
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                if mcdc["technique"]["ww"]["save"]:
+                    with objmode():
+                        f = h5py.File(
+                            mcdc["setting"]["output_name"]
+                            + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                            "a",
+                        )
+                        f.create_dataset(
+                            "weight_windows/center",
+                            data=mcdc["technique"]["ww"]["center"][idx_census + 1],
+                        )
+                        f.close()
+        MPI.COMM_WORLD.Barrier()
     return
 
 
@@ -3730,14 +3732,15 @@ def ww_previous(data, mcdc):
         if epsilon[WW_FILTER1] > 0:
             old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
         center = old_flux
-        if mcdc["technique"]["ww"]["save"]:
-            f = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "a",
-            )
-            f.create_dataset("weight_windows/phi_tilde", data=center)
-            f.close()
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            if mcdc["technique"]["ww"]["save"]:
+                f = h5py.File(
+                    mcdc["setting"]["output_name"]
+                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                    "a",
+                )
+                f.create_dataset("weight_windows/phi_tilde", data=center)
+                f.close()
     return center
 
 
@@ -3807,15 +3810,16 @@ def ww_alpha(data, mcdc):
         else:
             center = np.ones_like(mcdc["technique"]["ww"]["center"][idx_census])
             alpha = np.zeros_like(mcdc["technique"]["ww"]["center"][idx_census])
-        if mcdc["technique"]["ww"]["save"]:
-            f = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "a",
-            )
-            f.create_dataset("weight_windows/phi_tilde", data=center)
-            f.create_dataset("weight_windows/alpha", data=alpha)
-            f.close()
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            if mcdc["technique"]["ww"]["save"]:
+                f = h5py.File(
+                    mcdc["setting"]["output_name"]
+                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                    "a",
+                )
+                f.create_dataset("weight_windows/phi_tilde", data=center)
+                f.create_dataset("weight_windows/alpha", data=alpha)
+                f.close()
     return center
 
 
@@ -3903,14 +3907,15 @@ def ww_dmd(data, mcdc):
             f.close()
         else:
             center = np.ones_like(mcdc["technique"]["ww"]["center"][idx_census])
-        if mcdc["technique"]["ww"]["save"]:
-            f = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "a",
-            )
-            f.create_dataset("weight_windows/phi_tilde", data=center)
-            f.close()
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            if mcdc["technique"]["ww"]["save"]:
+                f = h5py.File(
+                    mcdc["setting"]["output_name"]
+                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
+                    "a",
+                )
+                f.create_dataset("weight_windows/phi_tilde", data=center)
+                f.close()
     return center
 
 
