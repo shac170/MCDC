@@ -3631,7 +3631,7 @@ def update_weight_windows(data, mcdc):
     rank = MPI.COMM_WORLD.Get_rank()
     for i in range(size):
         if i == rank:
-        
+
             idx_batch = mcdc["idx_batch"]
             idx_census = mcdc["idx_census"]
             center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
@@ -3665,7 +3665,8 @@ def update_weight_windows(data, mcdc):
                 )
             if epsilon[WW_MIN] > 0:
                 mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-                    mcdc["technique"]["ww"]["center"][idx_census + 1] * (1 - epsilon[WW_MIN])
+                    mcdc["technique"]["ww"]["center"][idx_census + 1]
+                    * (1 - epsilon[WW_MIN])
                     + epsilon[WW_MIN]
                 )
                 arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
