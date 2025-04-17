@@ -107,6 +107,7 @@ def mesh_tally(
                 "total",
                 "fission",
                 "density",
+                "tracks",
             ],
         )
         card.scores.append(score_checked)

@@ -902,20 +902,9 @@ def prepare():
                 score_type = SCORE_FISSION
             elif score_name == "net-current":
                 score_type = SCORE_NET_CURRENT
-            elif score_name == "mu-sq":
-                score_type = SCORE_MU_SQ
-            elif score_name == "time-moment-flux":
-                score_type = SCORE_TIME_MOMENT_FLUX
-            elif score_name == "space-moment-flux":
-                score_type = SCORE_SPACE_MOMENT_FLUX
-            elif score_name == "time-moment-current":
-                score_type = SCORE_TIME_MOMENT_CURRENT
-            elif score_name == "space-moment-current":
-                score_type = SCORE_SPACE_MOMENT_CURRENT
-            elif score_name == "time-moment-mu-sq":
-                score_type = SCORE_TIME_MOMENT_MU_SQ
-            elif score_name == "space-moment-mu-sq":
-                score_type = SCORE_SPACE_MOMENT_MU_SQ
+            elif score_name == "tracks":
+                score_type = SCORE_TRACKS
+
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -1950,6 +1939,8 @@ def generate_hdf5(data, mcdc):
                         score_name = "total"
                     elif score_type == SCORE_FISSION:
                         score_name = "fission"
+                    elif score_type == SCORE_TRACKS:
+                        score_name = "track-density"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
                     mean = score_tally_bin[TALLY_SUM]
@@ -2301,27 +2292,27 @@ def recombine_tallies(file="output.h5"):
                         "tallies/mesh_tally_" + str(idx_tally) + "/" + score + "/sdev",
                         data=tally_save[score + "_sq"],
                     )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/azi", data=azi
-                    )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/g", data=g
-                    )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/mu", data=mu
-                    )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/t", data=t
-                    )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/x", data=x
-                    )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/y", data=y
-                    )
-                    f.create_dataset(
-                        "tallies/mesh_tally_" + str(idx_tally) + "/grid/z", data=z
-                    )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/azi", data=azi
+                )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/g", data=g
+                )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/mu", data=mu
+                )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/t", data=t
+                )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/x", data=x
+                )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/y", data=y
+                )
+                f.create_dataset(
+                    "tallies/mesh_tally_" + str(idx_tally) + "/grid/z", data=z
+                )
         # Save weight window data
         weight_window_save = {}
         for i_census in range(N_census):

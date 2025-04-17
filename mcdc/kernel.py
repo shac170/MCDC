@@ -1958,6 +1958,8 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
             elif score_type == SCORE_FISSION:
                 SigmaF = get_MacroXS(XS_FISSION, material, P_arr, mcdc)
                 score = flux * SigmaF
+            elif score_type == SCORE_TRACKS:
+                score = 1
             adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
 
         # Accumulate distance swept
@@ -2425,6 +2427,8 @@ def census_based_tally_output(data, mcdc):
                     score_name = "total"
                 elif score_type == SCORE_FISSION:
                     score_name = "fission"
+                elif score_type == SCORE_TRACKS:
+                    score_name = "tracks"
                 group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
                 tally_sum = score_tally_bin[TALLY_SUM]
@@ -3623,7 +3627,10 @@ def weight_window(P_arr, prog):
 
 @njit
 def update_weight_windows(data, mcdc):
-
+    MPI.COMM_WORLD.Barrier()
+    turn = 0
+    while allreduce(turn) != MPI.COMM_WORLD.Get_rank():   
+        pass
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
@@ -3682,6 +3689,7 @@ def update_weight_windows(data, mcdc):
                 data=mcdc["technique"]["ww"]["center"][idx_census + 1],
             )
             f.close()
+    turn = 1
     return
 
 
