@@ -1502,7 +1502,7 @@ def weight_window(
                 card["ww"]["epsilon"][WW_FILTER1] = 2
             else:
                 card["ww"]["epsilon"][WW_FILTER1] = 1
-            card["ww"]["epsilon"][WW_FILTER1] = mod[2]
+            card["ww"]["epsilon"][WW_FILTER2] = mod[2]
 
     # Set mesh
     card["ww"]["mesh"]["x"] = x

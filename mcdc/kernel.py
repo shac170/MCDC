@@ -2342,11 +2342,45 @@ def tally_accumulate(data, mcdc):
 
 @njit
 def census_based_tally_output(data, mcdc):
+
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     tally_bin = data[TALLY]
     N_bin = tally_bin.shape[1]
+    N_history = mcdc["setting"]["N_particle"]
 
+    if mcdc["setting"]["N_batch"] > 1:
+        N_history = mcdc["setting"]["N_batch"]
+
+    elif mcdc["setting"]["mode_eigenvalue"]:
+        N_history = mcdc["setting"]["N_active"]
+
+    elif not mcdc["technique"]["domain_decomposition"]:
+        # MPI Reduce
+        buff = np.zeros_like(tally_bin[TALLY_SUM])
+        buff_sq = np.zeros_like(tally_bin[TALLY_SUM_SQ])
+        with objmode():
+            MPI.COMM_WORLD.Reduce(tally_bin[TALLY_SUM], buff, MPI.SUM, 0)
+            MPI.COMM_WORLD.Reduce(tally_bin[TALLY_SUM_SQ], buff_sq, MPI.SUM, 0)
+
+    else:
+        # find number of subdomains
+        N_dd = 1
+        N_dd *= mcdc["technique"]["dd_mesh"]["x"].size - 1
+        N_dd *= mcdc["technique"]["dd_mesh"]["y"].size - 1
+        N_dd *= mcdc["technique"]["dd_mesh"]["z"].size - 1
+        # DD Reduce if multiple processors per subdomain
+        if N_dd != mcdc["mpi_size"]:
+            dd_closeout(data, mcdc)
+        # tally[TALLY_SUM_SQ] /= mcdc["technique"]["dd_work_ratio"][mcdc["dd_idx"]]
+    # Calculate and store statistics
+    #   sum --> mean
+    #   sum_sq --> standard deviation
+    buff = buff / N_history
+    buff_sq = np.sqrt((buff_sq / N_history - np.square(buff)) / (N_history - 1))
+    tally_bin[TALLY_SUM] = buff
+    tally_bin[TALLY_SUM_SQ] = buff_sq
+    """
     for i in range(N_bin):
         # Store score and square of score
         score = tally_bin[TALLY_SCORE, i]
@@ -2355,7 +2389,7 @@ def census_based_tally_output(data, mcdc):
 
         # Reset score bin
         tally_bin[TALLY_SCORE, i] = 0.0
-
+    """
     for ID, tally in enumerate(mcdc["mesh_tallies"]):
         mesh = tally["filter"]
 

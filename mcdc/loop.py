@@ -335,8 +335,8 @@ def source_closeout(prog, idx_work, N_prog, data):
 
     # Tally history closeout for one-batch fixed-source simulation
     if not mcdc["setting"]["mode_eigenvalue"] and mcdc["setting"]["N_batch"] == 1:
-        if not mcdc["setting"]["census_based_tally"]:
-            kernel.tally_accumulate(data, mcdc)
+        # if not mcdc["setting"]["census_based_tally"]:
+        kernel.tally_accumulate(data, mcdc)
 
     # Tally history closeout for multi-batch uq simulation
     if mcdc["technique"]["uq"]:
