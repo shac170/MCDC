@@ -3685,18 +3685,9 @@ def update_weight_windows(data, mcdc):
                 center = ww_dmd(data, mcdc)
                 mcdc["technique"]["ww"]["center"][idx_census + 1] = center
 
-            if epsilon[WW_WOLLABER1] > 0:
-                w_min = epsilon[WW_WOLLABER2]
-                mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-                    mcdc["technique"]["ww"]["center"][idx_census + 1]
-                ) * (
-                    1
-                    + (1 / epsilon[WW_WOLLABER1] - 1)
-                    * np.exp(
-                        -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
-                        / epsilon[WW_WOLLABER1]
-                    )
-                )
+            mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
+                mcdc["technique"]["ww"]["center"][idx_census + 1]
+            )
             if epsilon[WW_MIN] > 0:
                 mcdc["technique"]["ww"]["center"][idx_census + 1] = (
                     mcdc["technique"]["ww"]["center"][idx_census + 1]
@@ -3709,10 +3700,19 @@ def update_weight_windows(data, mcdc):
                         for k in range(arr.shape[2]):
                             if arr[i, j, k] <= 0:
                                 arr[i, j, k] = epsilon[WW_MIN]
+            if epsilon[WW_WOLLABER1] > 0:
+                w_min = epsilon[WW_WOLLABER2]
+                mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+                    mcdc["technique"]["ww"]["center"][idx_census + 1]
+                ) * (
+                    1
+                    + (1 / epsilon[WW_WOLLABER1] - 1)
+                    * np.exp(
+                        -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
+                        / epsilon[WW_WOLLABER1]
+                    )
+                )
 
-            mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
-                mcdc["technique"]["ww"]["center"][idx_census + 1]
-            )
             if MPI.COMM_WORLD.Get_rank() == 0:
                 if mcdc["technique"]["ww"]["save"]:
                     with objmode():
