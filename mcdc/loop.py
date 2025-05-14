@@ -86,6 +86,14 @@ def loop_fixed_source(data_arr, mcdc_arr):
 
         # Loop over time censuses
         for idx_census in range(mcdc["setting"]["N_census"]):
+            data[TALLY] = np.zeros_like(data[TALLY])
+            tally_bin = data[TALLY]
+            if np.min(np.square(tally_bin[TALLY_SUM]) - tally_bin[TALLY_SUM_SQ]) < 0:
+                print(
+                    "FAIL31",
+                    np.min(np.square(tally_bin[TALLY_SUM]) - tally_bin[TALLY_SUM_SQ]),
+                )
+                input()
             mcdc["idx_census"] = idx_census
             seed_census = kernel.split_seed(seed_batch, SEED_SPLIT_CENSUS)
 
@@ -131,9 +139,13 @@ def loop_fixed_source(data_arr, mcdc_arr):
 
             # Time census-based tally closeout
             if mcdc["setting"]["census_based_tally"]:
-                kernel.tally_reduce(data, mcdc)
+                # kernel.tally_reduce(data, mcdc)
+                # kernel.tally_accumulate(data,mcdc)
+                # kernel.tally_closeout(data,mcdc)
+
                 if mcdc["mpi_master"]:
                     kernel.census_based_tally_output(data, mcdc)
+                # data[TALLY] = np.zeros_like(data[TALLY])
                 if (
                     mcdc["technique"]["weight_window"]
                     and idx_census < mcdc["setting"]["N_census"] - 2
@@ -335,8 +347,8 @@ def source_closeout(prog, idx_work, N_prog, data):
 
     # Tally history closeout for one-batch fixed-source simulation
     if not mcdc["setting"]["mode_eigenvalue"] and mcdc["setting"]["N_batch"] == 1:
-        # if not mcdc["setting"]["census_based_tally"]:
-        kernel.tally_accumulate(data, mcdc)
+        if not mcdc["setting"]["census_based_tally"]:
+            kernel.tally_accumulate(data, mcdc)
 
     # Tally history closeout for multi-batch uq simulation
     if mcdc["technique"]["uq"]:
