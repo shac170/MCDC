@@ -1146,7 +1146,7 @@ def make_type_technique(input_deck):
     ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
-    ww_list += [("epsilon", float64, (6,))]
+    ww_list += [("epsilon", float64, (9,))]
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("save", bool_)]
     ww_list += [("tally_idx", int64)]
@@ -1241,6 +1241,71 @@ def make_type_technique(input_deck):
     ]
 
     struct += [("iqmc", into_dtype(iqmc_list))]
+
+    # =========================================================================
+    # Hybrid LOSM Monte Carlo
+    # =========================================================================
+    losm_list = []
+
+    # Mesh (for qmc source tallies)
+    if card["LOSM"]:
+        mesh, Nx, Ny, Nz, Nt, Nmu, N_azi = make_type_mesh_(card["losm"]["mesh"])
+
+        Ng = G
+        N_dim = 6  # group, x, y, z, mu, phi
+    else:
+        Nx = Ny = Nz = Nt = Nmu = N_azi = N_particle = Ng = N_dim = 0
+
+    losm_list += [("mesh", mesh)]
+
+    #  make low-discprenecy sequence array
+    work_size = get_work_size(N_particle)
+    losm_list += [("material_idx", int64, (Nt, Nx, Ny, Nz))]
+    losm_list += [("source", float64, (Ng, Nt, Nx, Ny, Nz))]
+
+    # Make scores
+    scores_shapes = [
+        ["flux", (Ng, Nt, Nx, Ny, Nz)],
+        #["flux_x_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["flux_t_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["flux_xt_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["current", (Ng, Nt, Nx, Ny, Nz)],
+        #["current_x_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["current_t_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["current_xt_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["second_moment", (Ng, Nt, Nx, Ny, Nz)],
+        #["sm_x_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["sm_t_slope", (Ng, Nt, Nx, Ny, Nz)],
+        #["sm_xt_slope", (Ng, Nt, Nx, Ny, Nz)],
+    ]
+
+    if card["LOSM"]:
+        if setting["mode_eigenvalue"]:
+            card["losm"]["score_list"]["fission-source"] = True
+
+    # Add score flags to structure
+    score_list = []
+    for i in range(len(scores_shapes)):
+        name = scores_shapes[i][0]
+        score_list += [(name, bool_)]
+    score_list = into_dtype(score_list)
+    losm_list += [("score_list", score_list)]
+
+    # Add scores to structure
+    scores_struct = []
+    for i in range(len(scores_shapes)):
+        name = scores_shapes[i][0]
+        shape = scores_shapes[i][1]
+        if not card["losm"]["score_list"][name]:
+            shape = (0,) * len(shape)
+        scores_struct += [(name, make_type_score(shape))]
+    # TODO: make outter effective fission size zero if not eigenmode
+    # (causes problems with numba)
+    #scores_struct += [("effective-fission-outter", float64, (Ng, Nt, Nx, Ny, Nz))]
+    scores = into_dtype(scores_struct)
+    losm_list += [("score", scores)]
+
+    struct += [("losm", into_dtype(losm_list))]
 
     # =========================================================================
     # IC generator

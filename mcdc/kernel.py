@@ -8,7 +8,8 @@ from numba import (
     objmode,
     uint64,
 )
-
+import os
+import matplotlib.pyplot as plt
 import mcdc.adapt as adapt
 import mcdc.src.geometry as geometry
 import mcdc.src.mesh as mesh_
@@ -20,6 +21,8 @@ from mcdc.adapt import toggle, for_cpu, for_gpu
 from mcdc.constant import *
 from mcdc.print_ import print_error, print_msg
 from mcdc.src.algorithm import binary_search, binary_search_with_length
+
+from mcdc.losm.losm_kernel import losm_create_problem, losm_create_state, losm_step_time, losm_average_state, losm_convert_moments
 
 
 @njit
@@ -1960,6 +1963,54 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
                 score = flux * SigmaF
             elif score_type == SCORE_TRACKS:
                 score = 1
+            elif score_type == SCORE_NET_CURRENT:
+                score = flux * P['ux']
+
+            elif score_type == SCORE_SECOND_MOMENT:
+                score = flux * P['ux'] * P['ux']
+
+            elif score_type == SCORE_FLUX_MT:
+                t1 = t + distance_scored * ut
+                score = P["w"] * (0.5 * (t1**2 - t**2) - ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))
+
+            elif score_type == SCORE_FLUX_MX:
+                x1 = x + distance_scored * ux
+                score = (P["w"]/ ux* (0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x)))
+
+            elif score_type == SCORE_FLUX_MTX:
+                t1 = t + distance_scored * ut
+                x1 = x + distance_scored * ux
+                score = (P["w"]/ ux*((0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x))
+                        * (0.5 * (t1**2 - t**2)- ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))))
+        
+            elif score_type == SCORE_CURRENT_MT:
+                t1 = t + distance_scored * ut
+                score = P["w"]*P["ux"] * (0.5 * (t1**2 - t**2) - ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))
+
+            elif score_type == SCORE_CURRENT_MX:
+                x1 = x + distance_scored * ux
+                score = (P["w"]*P["ux"]/ ux* (0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x)))
+
+            elif score_type == SCORE_CURRENT_MTX:
+                t1 = t + distance_scored * ut
+                x1 = x + distance_scored * ux
+                score = (P["w"]*P["ux"]/ ux*((0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x))
+                        * (0.5 * (t1**2 - t**2)- ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))))
+            
+            elif score_type == SCORE_SECOND_MOMENT_MT:
+                t1 = t + distance_scored * ut
+                score = P["w"]* P['ux'] * P['ux'] * (0.5 * (t1**2 - t**2) - ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))
+
+            elif score_type == SCORE_SECOND_MOMENT_MX:
+                x1 = x + distance_scored * ux
+                score = (P["w"]* P['ux'] * P['ux']/ ux* (0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x)))
+
+            elif score_type == SCORE_SECOND_MOMENT_MTX:
+                t1 = t + distance_scored * ut
+                x1 = x + distance_scored * ux
+                score = (P["w"]* P['ux'] * P['ux']/ ux*((0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x))
+                        * (0.5 * (t1**2 - t**2)- ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))))
+                
             adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
 
         # Accumulate distance swept
@@ -2329,7 +2380,7 @@ def tally_reduce(data, mcdc):
 def tally_accumulate(data, mcdc):
     tally_bin = data[TALLY]
     N_bin = tally_bin.shape[1]
-
+    
     for i in range(N_bin):
         # Accumulate score and square of score into sum and sum_sq
         score = tally_bin[TALLY_SCORE, i]
@@ -3625,76 +3676,151 @@ def weight_window(P_arr, prog):
         else:
             P["w"] = w_target
 
+def save_weight_window_data(name, data):
+    """
+    Appends or creates a dataset in ww_data.h5 for the given named quantity.
+
+    Parameters:
+    - name (str): Name of the quantity
+    - data (np.ndarray): 1D array for the current timestep
+    - overwrite (bool): If True, creates a new file and dataset
+    - out_dir (str): Directory to save the HDF5 file (default is current)
+    """
+    data = np.squeeze(data)
+    with h5py.File("ww_data.h5", "a") as f:
+        if name not in f:
+            maxshape = (None, data.shape[0])  # Unlimited rows, fixed width
+            dset = f.create_dataset(name, data=np.expand_dims(data, axis=0),maxshape=maxshape,chunks=True)
+        else:
+            dset = f[name]
+            dset.resize((dset.shape[0] + 1, dset.shape[1]))  # Add a new row
+            dset[-1, :] = data
 
 @njit
 def update_weight_windows(data, mcdc):
-    size = MPI.COMM_WORLD.Get_size()
-    rank = MPI.COMM_WORLD.Get_rank()
-    for i in range(size):
-        if i == rank:
 
-            idx_batch = mcdc["idx_batch"]
-            idx_census = mcdc["idx_census"]
-            center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
-            epsilon = mcdc["technique"]["ww"]["epsilon"]
-            if mcdc["technique"]["ww"]["auto"] == WW_USER:
-                return
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
 
-            elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
-                center = ww_previous(data, mcdc)
-                mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+    # initialize ww_data file
+    if idx_census == 1:
+        with h5py.File("ww_data.h5", "w") as f:
+            f.close()
 
-            elif mcdc["technique"]["ww"]["auto"] == WW_ALPHA:
-                center = ww_alpha(data, mcdc)
-                mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+    center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    if mcdc["technique"]["ww"]["auto"] == WW_USER:
+        return
 
-            elif mcdc["technique"]["ww"]["auto"] == WW_DMD:
-                center = ww_dmd(data, mcdc)
-                mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+    elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
+        center = ww_previous(data, mcdc)
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
 
-            mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
-                mcdc["technique"]["ww"]["center"][idx_census + 1]
+    elif mcdc["technique"]["ww"]["auto"] == WW_ALPHA:
+        center = ww_alpha(data, mcdc)
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+
+    elif mcdc["technique"]["ww"]["auto"] == WW_DMD:
+        center = ww_dmd(data, mcdc)
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+
+    elif mcdc["technique"]["ww"]["auto"] == WW_HYBRID:
+        center = ww_hybrid(data, mcdc)
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+
+    mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
+        mcdc["technique"]["ww"]["center"][idx_census + 1]
+    )
+    if epsilon[WW_MIN] > 0:
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+            mcdc["technique"]["ww"]["center"][idx_census + 1]
+            * (1 - epsilon[WW_MIN])
+            + epsilon[WW_MIN]
+        )
+        arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                for k in range(arr.shape[2]):
+                    if arr[i, j, k] <= 0:
+                        arr[i, j, k] = epsilon[WW_MIN]
+    if epsilon[WW_WOLLABER1] > 0:
+        w_min = epsilon[WW_WOLLABER2]
+        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
+            mcdc["technique"]["ww"]["center"][idx_census + 1]
+        ) * (
+            1
+            + (1 / epsilon[WW_WOLLABER1] - 1)
+            * np.exp(
+                -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
+                / epsilon[WW_WOLLABER1]
             )
-            if epsilon[WW_MIN] > 0:
-                mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-                    mcdc["technique"]["ww"]["center"][idx_census + 1]
-                    * (1 - epsilon[WW_MIN])
-                    + epsilon[WW_MIN]
-                )
-                arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
-                for i in range(arr.shape[0]):
-                    for j in range(arr.shape[1]):
-                        for k in range(arr.shape[2]):
-                            if arr[i, j, k] <= 0:
-                                arr[i, j, k] = epsilon[WW_MIN]
-            if epsilon[WW_WOLLABER1] > 0:
-                w_min = epsilon[WW_WOLLABER2]
-                mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-                    mcdc["technique"]["ww"]["center"][idx_census + 1]
-                ) * (
-                    1
-                    + (1 / epsilon[WW_WOLLABER1] - 1)
-                    * np.exp(
-                        -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
-                        / epsilon[WW_WOLLABER1]
-                    )
-                )
-
-            if MPI.COMM_WORLD.Get_rank() == 0:
-                if mcdc["technique"]["ww"]["save"]:
-                    with objmode():
-                        f = h5py.File(
-                            mcdc["setting"]["output_name"]
-                            + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                            "a",
-                        )
-                        f.create_dataset(
-                            "weight_windows/center",
-                            data=mcdc["technique"]["ww"]["center"][idx_census + 1],
-                        )
-                        f.close()
-        MPI.COMM_WORLD.Barrier()
+        )
+    save_weight_window_data("window_center",mcdc["technique"]["ww"]["center"][idx_census + 1])
     return
+
+def get_tally(idx, mcdc, data, score):
+    # Determine the correct tally list based on tally_type
+    # Mesh tallies
+    for ID, tally in enumerate(mcdc["mesh_tallies"]):
+        if mcdc["technique"]["iQMC"]:
+            break
+
+        mesh = tally["filter"]
+
+        # Get grid
+        Nx = mesh["Nx"]
+        Ny = mesh["Ny"]
+        Nz = mesh["Nz"]
+        Nt = mesh["Nt"]
+        Nmu = mesh["Nmu"]
+        N_azi = mesh["N_azi"]
+        Ng = mesh["Ng"]
+        #
+        grid_x = mesh["x"][: Nx + 1]
+        grid_y = mesh["y"][: Ny + 1]
+        grid_z = mesh["z"][: Nz + 1]
+        grid_t = mesh["t"][: Nt + 1]
+        grid_mu = mesh["mu"][: Nmu + 1]
+        grid_azi = mesh["azi"][: N_azi + 1]
+        grid_g = mesh["g"][: Ng + 1]
+        dx = grid_x[:-1] - grid_x[1:]
+        dt = grid_t[:-1] - grid_t[1:]
+        # Set tally shape
+        N_score = tally["N_score"]
+        if mcdc["technique"]["domain_decomposition"]:
+            Nx = mcdc["technique"]["dd_xsum"]
+            Ny = mcdc["technique"]["dd_ysum"]
+            Nz = mcdc["technique"]["dd_zsum"]
+        if not mcdc["technique"]["uq"]:
+            shape = (3, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+        else:
+            shape = (5, Nmu, N_azi, Ng, Nt, Nx, Ny, Nz, N_score)
+
+        # Reshape tally
+        N_bin = tally["N_bin"]
+        if mcdc["technique"]["domain_decomposition"]:
+            # use recomposed N_bin
+            N_bin = 1
+            for elem in shape:
+                N_bin *= elem
+        start = tally["stride"]["tally"]
+        tally_bin = data[TALLY][:, start : start + N_bin]
+        tally_bin = tally_bin.reshape(shape)
+
+        # Roll tally so that score is in the front
+        tally_bin = np.rollaxis(tally_bin, 8, 0)
+
+        # Iterate over scores
+        for i in range(N_score):
+            score_type = tally["scores"][i]
+            score_tally_bin = np.squeeze(tally_bin[i])
+            if score_type == score:
+                mean = score_tally_bin[TALLY_SUM]
+
+        N_particle = mcdc["setting"]["N_particle"]
+        scaled_tally = mean[idx][:]/(N_particle*dx*dt[0])
+        return scaled_tally #mean[idx][:]#, sdev[idx][:]
+
 
 
 @njit
@@ -3706,43 +3832,20 @@ def ww_previous(data, mcdc):
     Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
     Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
     Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
-    with objmode(center="float64[:,:,:]"):
-        f = h5py.File(
-            mcdc["setting"]["output_name"]
-            + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-            "r",
-        )
-        tallies = f["tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])]
-        x = tallies["grid"]["x"]
-        t = tallies["grid"]["t"]
-        dx = x[1:] - x[:-1]
-        dt = t[1] - t[0]
-        if mcdc["setting"]["census_tally_frequency"] > 1:
-            old_flux = tallies["flux/score"][-1][()] / (dx * dt)
-        else:
-            old_flux = tallies["flux/score"][()] / (dx * dt)
-        f.close()
-        ax_expand = []
-        if Nx == 1:
-            ax_expand.append(0)
-        if Ny == 1:
-            ax_expand.append(1)
-        if Nz == 1:
-            ax_expand.append(2)
-        for ax in ax_expand:
-            old_flux = np.expand_dims(old_flux, axis=ax)
-        if epsilon[WW_FILTER1] > 0:
-            old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
-        center = old_flux
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            if mcdc["technique"]["ww"]["save"]:
-                f = h5py.File(
-                    mcdc["setting"]["output_name"]
-                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                    "a",
-                )
-                f.create_dataset("weight_windows/phi_tilde", data=center)
-                f.close()
+    old_flux = get_tally(idx_census, mcdc, data, SCORE_FLUX)
+    ax_expand = []
+    if Nx == 1:
+        ax_expand.append(0)
+    if Ny == 1:
+        ax_expand.append(1)
+    if Nz == 1:
+        ax_expand.append(2)
+    for ax in ax_expand:
+        old_flux = np.expand_dims(old_flux, axis=ax)
+    if epsilon[WW_FILTER1] > 0:
+        old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
+    center = old_flux
+    save_weight_window_data("lagged_solution",old_flux)
     return center
 
 
@@ -3752,76 +3855,36 @@ def ww_alpha(data, mcdc):
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
-    with objmode(center="float64[:,:,:]"):
-        if idx_census > 0:
-            f1 = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                "r",
-            )
-            f2 = h5py.File(
-                mcdc["setting"]["output_name"]
-                + "-batch_%i-census_%i.h5" % (idx_batch, idx_census - 1),
-                "r",
-            )
-            tally1 = f1[
-                "tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])
-            ]
-            tally2 = f2[
-                "tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])
-            ]
-            x = tally1["grid"]["x"]
-            t = tally1["grid"]["t"]
-            dx = x[1:] - x[:-1]
-            dt = t[1] - t[0]
-            if mcdc["setting"]["census_tally_frequency"] > 1:
-                flux1 = tally1["flux"]["score"][-1][()] / (dx * dt)
-                flux2 = tally2["flux"]["score"][-1][()] / (dx * dt)
-            else:
-                flux1 = tally1["flux"]["score"][()] / (dx * dt)
-                flux2 = tally2["flux"]["score"][()] / (dx * dt)
+    flux1 =  get_tally(idx_census, mcdc, data, SCORE_FLUX)#/ (dx * dt)
+    flux2 =  get_tally(idx_census-1, mcdc, data, SCORE_FLUX)#/ (dx * dt)
 
-            Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
-            Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
-            Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
+    Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+    Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
+    Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
 
-            ax_expand = []
-            if Nx == 1:
-                ax_expand.append(0)
-            if Ny == 1:
-                ax_expand.append(1)
-            if Nz == 1:
-                ax_expand.append(2)
-            for ax in ax_expand:
-                flux1 = np.expand_dims(flux1, axis=ax)
-                flux2 = np.expand_dims(flux2, axis=ax)
-            dt = (
-                mcdc["setting"]["census_time"][idx_census]
-                - mcdc["setting"]["census_time"][idx_census - 1]
-            )
-            if epsilon[WW_FILTER1] > 0:
-                flux1 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux1)
-                flux2 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux2)
-            # Computing alpha
-            alpha = (1 / dt) * np.log(np.abs(flux1 / flux2))
-            alpha[flux2 == 0] = 1 / dt
-            alpha[alpha > 3] = 2
+    ax_expand = []
+    if Nx == 1:
+        ax_expand.append(0)
+    if Ny == 1:
+        ax_expand.append(1)
+    if Nz == 1:
+        ax_expand.append(2)
+    for ax in ax_expand:
+        flux1 = np.expand_dims(flux1, axis=ax)
+        flux2 = np.expand_dims(flux2, axis=ax)
+    dt = (
+        mcdc["setting"]["census_time"][idx_census]
+        - mcdc["setting"]["census_time"][idx_census - 1]
+    )
+    if epsilon[WW_FILTER1] > 0:
+        flux1 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux1)
+        flux2 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux2)
+    # Computing alpha
+    alpha = (1 / dt) * np.log(np.abs(flux1 / flux2))
+    alpha[flux2 == 0] = 1 / dt
+    alpha[alpha > 3] = 2
 
-            center = flux1 * np.exp(alpha * dt)
-            f1.close()
-        else:
-            center = np.ones_like(mcdc["technique"]["ww"]["center"][idx_census])
-            alpha = np.zeros_like(mcdc["technique"]["ww"]["center"][idx_census])
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            if mcdc["technique"]["ww"]["save"]:
-                f = h5py.File(
-                    mcdc["setting"]["output_name"]
-                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                    "a",
-                )
-                f.create_dataset("weight_windows/phi_tilde", data=center)
-                f.create_dataset("weight_windows/alpha", data=alpha)
-                f.close()
+    center = flux1 * np.exp(alpha * dt)
     return center
 
 
@@ -3847,23 +3910,8 @@ def ww_dmd(data, mcdc):
         if idx_census >= int(epsilon[WW_N_SNAP]) - 1:
             snapshots = []
             for n in range(n_snapshot):
-
-                f = h5py.File(
-                    mcdc["setting"]["output_name"]
-                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census - n),
-                    "r",
-                )
-                tally = f[
-                    "tallies/mesh_tally_" + str(mcdc["technique"]["ww"]["tally_idx"])
-                ]
-                x = tally["grid"]["x"]
-                t = tally["grid"]["t"]
-                dx = x[1:] - x[:-1]
-                dt = t[1] - t[0]
-                if mcdc["setting"]["census_tally_frequency"] > 1:
-                    flux = tally["flux"]["score"][-1] / (dx * dt)
-                else:
-                    flux = tally["flux"]["score"] / (dx * dt)
+                    
+                flux = get_tally(idx_census-n, mcdc, data, SCORE_FLUX)# / (dx * dt)
 
                 if epsilon[WW_FILTER1] > 0:
                     flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux)
@@ -3906,20 +3954,134 @@ def ww_dmd(data, mcdc):
                 ax_expand.append(2)
             for ax in ax_expand:
                 center = np.expand_dims(center, axis=ax)
-            f.close()
         else:
             center = np.ones_like(mcdc["technique"]["ww"]["center"][idx_census])
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            if mcdc["technique"]["ww"]["save"]:
-                f = h5py.File(
-                    mcdc["setting"]["output_name"]
-                    + "-batch_%i-census_%i.h5" % (idx_batch, idx_census),
-                    "a",
-                )
-                f.create_dataset("weight_windows/phi_tilde", data=center)
-                f.close()
     return center
 
+def plot_moments(name,moments):
+    plt.clf()
+    plt.plot(moments[0,:],label = "1")
+    plt.plot(moments[1,:],label = "2")
+    plt.plot(moments[2,:],label = "3")
+    plt.plot(moments[3,:],label = "4")
+    plt.title(name)
+    plt.legend()
+    plt.show()
+def ww_hybrid(data, mcdc):
+    # accessing most recent tally dump
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    mesh_x = mcdc["technique"]["ww"]["mesh"]["x"]
+    t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census-1]
+    t1 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
+    Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+    Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
+    Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
+    dt =  t1 - t0
+
+    # Load previous timestep tally data
+    # Flux and moments
+    old_flux = get_tally(idx_census, mcdc, data, SCORE_FLUX)
+    old_flux_t = get_tally(idx_census, mcdc, data, SCORE_FLUX_MT)
+    old_flux_x = get_tally(idx_census, mcdc, data, SCORE_FLUX_MX)
+    old_flux_tx = get_tally(idx_census, mcdc, data, SCORE_FLUX_MTX)
+    
+    old_current = get_tally(idx_census, mcdc, data, SCORE_NET_CURRENT)
+    old_current_t = get_tally(idx_census, mcdc, data, SCORE_CURRENT_MT)
+    old_current_x = get_tally(idx_census, mcdc, data, SCORE_CURRENT_MX)
+    old_current_tx = get_tally(idx_census, mcdc, data, SCORE_CURRENT_MTX)
+    
+    old_sm = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT)
+    old_sm_t = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT_MT)
+    old_sm_x = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT_MX)
+    old_sm_tx = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT_MTX)
+
+    if epsilon[WW_FILTER1] > 0:
+        old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
+        old_flux_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_x)
+        old_flux_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_t)
+        old_flux_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_tx)
+        old_current = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current)
+        old_current_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_x)
+        old_current_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_t)
+        old_current_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_tx)
+        old_sm = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm)
+        old_sm_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm_x)
+        old_sm_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm_t)
+        old_sm_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm_tx)
+
+    sm = losm_convert_moments(old_sm,old_sm_x,old_sm_t,old_sm_tx,mesh_x,t0,t1)
+    plot_moments("SM",sm)
+    flux = losm_convert_moments(old_flux,old_flux_x,old_flux_t,old_flux_tx,mesh_x,t0,t1)
+    plot_moments("flux",flux)
+    current = losm_convert_moments(old_current,old_current_x,old_current_t,old_current_tx,mesh_x,t0,t1)
+    plot_moments("current",current)
+
+    F = (flux/3)-sm
+    # Compute closures
+    P = np.zeros((4,Nx)) # get_tally(idx_census, mcdc, data, SCORE_P_PLUS)
+    T = np.zeros((4,Nx)) # get_tally(idx_census, mcdc, data, SCORE_T_PLUS)
+
+
+    # dict for problem
+    closure={'F':F,
+            'P':P,
+            'T':T}
+
+    old_state = np.zeros(Nx*8)
+    for i in range(Nx):
+        for i1 in range(4):
+            old_state[i*8+i1] = flux[i1,i]
+        for i2 in range(4):
+            old_state[i*8+4+i2] = current[i2,i]
+
+    problem = losm_create_problem(mcdc)
+    new_state = losm_step_time(problem,old_state,closure,dt=dt,save_a=False,sparse = True)    
+    new_flux, new_current = losm_average_state(new_state)
+
+    if True:
+        plt.clf()
+        plt.plot(old_flux,label="old_flux")
+        plt.plot(new_flux,label="new_flux")
+        plt.legend()
+        plt.show()
+
+        plt.clf()
+        plt.plot(old_current,label="old_current")
+        plt.plot(new_current,label="new_current")
+        plt.legend()
+        plt.show()
+
+    ax_expand = []
+    if Nx == 1:
+        ax_expand.append(0)
+    if Ny == 1:
+        ax_expand.append(1)
+    if Nz == 1:
+        ax_expand.append(2)
+    for ax in ax_expand:
+        new_flux = np.expand_dims(new_flux, axis=ax)
+    if epsilon[WW_FILTER1] > 0:
+        new_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], new_flux)
+    center = new_flux
+    save_weight_window_data("ic_flux",old_flux)
+    save_weight_window_data("ic_current",old_current)
+    save_weight_window_data("new_flux",new_flux)
+    save_weight_window_data("new_current",new_current)
+    save_weight_window_data("F1",F[0,:])
+    save_weight_window_data("F2",F[1,:])
+    save_weight_window_data("F3",F[2,:])
+    save_weight_window_data("F4",F[3,:])
+    save_weight_window_data("flux1",flux[0,:])
+    save_weight_window_data("flux2",flux[1,:])
+    save_weight_window_data("flux3",flux[2,:])
+    save_weight_window_data("flux4",flux[3,:])
+    save_weight_window_data("current1",current[0,:])
+    save_weight_window_data("current2",current[1,:])
+    save_weight_window_data("current3",current[2,:])
+    save_weight_window_data("current4",current[3,:])
+    return center
 
 @njit
 def filter_data(w, k, data):

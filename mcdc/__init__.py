@@ -16,6 +16,7 @@ from mcdc.input_ import (
     branchless_collision,
     time_census,
     weight_window,
+    hybrid,
     iQMC,
     weight_roulette,
     IC_generator,

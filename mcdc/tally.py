@@ -108,6 +108,17 @@ def mesh_tally(
                 "fission",
                 "density",
                 "tracks",
+                "net-current",
+                "flux-mx",
+                "flux-mt",
+                "flux-mtx",
+                "current-mx",
+                "current-mt",
+                "current-mtx", 
+                "second-moment",
+                "second-moment-mx",
+                "second-moment-mt",
+                "second-moment-mtx",
             ],
         )
         card.scores.append(score_checked)

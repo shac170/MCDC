@@ -34,6 +34,8 @@ from mcdc.loop import (
     build_gpu_progs,
 )
 from mcdc.iqmc.iqmc_loop import iqmc_simulation, iqmc_validate_inputs
+from mcdc.losm.losm_kernel import losm_preprocess
+
 import mcdc.src.geometry as geometry
 
 import mcdc.loop as loop
@@ -67,6 +69,9 @@ def run():
     data_arr, mcdc_arr = prepare()
     data = data_arr[0]
     mcdc = mcdc_arr[0]
+    if input_deck.technique["LOSM"]:
+        losm_preprocess(mcdc)
+
     mcdc["runtime_preparation"] = MPI.Wtime() - preparation_start
 
     # Print banner, hardware configuration, and header
@@ -904,7 +909,26 @@ def prepare():
                 score_type = SCORE_NET_CURRENT
             elif score_name == "tracks":
                 score_type = SCORE_TRACKS
-
+            elif score_name == "flux-mx":
+                score_type = SCORE_FLUX_MX
+            elif score_name == "flux-mt":
+                score_type = SCORE_FLUX_MT
+            elif score_name == "flux-mtx":
+                score_type = SCORE_FLUX_MTX
+            elif score_name == "current-mx":
+                score_type = SCORE_CURRENT_MX
+            elif score_name == "current-mt":
+                score_type = SCORE_CURRENT_MT
+            elif score_name == "current-mtx":
+                score_type = SCORE_CURRENT_MTX
+            elif score_name == "second-moment":
+                score_type = SCORE_SECOND_MOMENT
+            elif score_name == "second-moment-mx":
+                score_type = SCORE_SECOND_MOMENT_MX
+            elif score_name == "second-moment-mt":
+                score_type = SCORE_SECOND_MOMENT_MT
+            elif score_name == "second-moment-mtx":
+                score_type = SCORE_SECOND_MOMENT_MTX
             mcdc["mesh_tallies"][i]["scores"][j] = score_type
 
         # Filter grid sizes
@@ -1368,6 +1392,24 @@ def prepare():
             mcdc["technique"]["iqmc"]["score"][name]["bin"] = value
         # minimum particle weight
         iqmc["w_min"] = 1e-13
+
+    # =========================================================================
+    # Hybrid LOSM
+    # =========================================================================
+
+    if input_deck.technique["LOSM"]:
+        # pass in mesh
+        losm = mcdc["technique"]["losm"]
+        for name in ["x", "y", "z", "t"]:
+            copy_field(losm["mesh"], input_deck.technique["losm"]["mesh"], name)
+        Nx = len(input_deck.technique["losm"]["mesh"]["x"]) - 1
+        Ny = len(input_deck.technique["losm"]["mesh"]["y"]) - 1
+        Nz = len(input_deck.technique["losm"]["mesh"]["z"]) - 1
+        Nt = len(input_deck.technique["losm"]["mesh"]["t"]) - 1
+        losm["mesh"]["Nx"] = Nx
+        losm["mesh"]["Ny"] = Ny
+        losm["mesh"]["Nz"] = Nz
+        losm["mesh"]["Nt"] = Nt
 
     # =========================================================================
     # Variance Deconvolution - UQ
@@ -1941,6 +1983,28 @@ def generate_hdf5(data, mcdc):
                         score_name = "fission"
                     elif score_type == SCORE_TRACKS:
                         score_name = "tracks"
+                    elif score_type == SCORE_NET_CURRENT:
+                        score_name = "current"
+                    elif score_type == SCORE_FLUX_MX:
+                        score_name = "flux-mx"
+                    elif score_type == SCORE_FLUX_MT:
+                        score_name = "flux-mt"
+                    elif score_type == SCORE_FLUX_MTX:
+                        score_name = "flux-mtx"
+                    elif score_type == SCORE_CURRENT_MX:
+                        score_name = "current-mx"
+                    elif score_type == SCORE_CURRENT_MT:
+                        score_name = "current-mt"
+                    elif score_type == SCORE_CURRENT_MTX:
+                        score_name = "current-mtx"
+                    elif score_type == SCORE_SECOND_MOMENT:
+                        score_name = "second-moment"
+                    elif score_type == SCORE_SECOND_MOMENT_MX:
+                        score_name = "second-moment-mx"
+                    elif score_type == SCORE_SECOND_MOMENT_MT:
+                        score_name = "second-moment-mt"
+                    elif score_type == SCORE_SECOND_MOMENT_MTX:
+                        score_name = "second-moment-mtx"
                     group_name = "tallies/mesh_tally_%i/%s/" % (ID, score_name)
 
                     mean = score_tally_bin[TALLY_SUM]

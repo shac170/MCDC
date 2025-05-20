@@ -50,6 +50,7 @@ from mcdc.constant import (
     WW_N_SNAP,
     WW_FILTER1,
     WW_FILTER2,
+    WW_HYBRID,
 )
 from mcdc.print_ import print_error
 import mcdc.type_ as type_
@@ -1290,6 +1291,94 @@ def time_census(t, tally_frequency=None):
         card["census_based_tally"] = True
         card["census_tally_frequency"] = tally_frequency
 
+def hybrid(
+    g=None,
+    t=None,
+    x=None,
+    y=None,
+    z=None,
+    source0=None,
+    space_discretization = "linear-discontinous", #"finite-volume"
+    time_discretization = "crank-nicolson", #"backward-euler"
+    fixed_source=None,
+    scores=[],
+):
+    """
+    Activate hybrid deterministic / Monte Carlo transport.
+
+    Parameters
+    ----------
+    g : array_like[float], optional
+        Energy values that define energy mesh (default None).
+    t : array_like[float], optional
+        Time values that define time mesh (default None).
+    x : array_like[float], optional
+        x-coordinates that define spacial mesh (default None).
+    y : array_like[float], optional
+        y-coordinates that define spacial mesh (default None).
+    z : array_like[float], optional
+        z-coordinates that define spacial mesh (default None).
+
+    Other Parameters
+    ----------
+    source0 : array_like[float], optional
+        Initial particle source (default None).
+    space_discretization : {'linear-discontinous', 'finite-volume'}
+        Spatial discretization for deterministic equations.
+    time_discretization : {'backward-euler', 'crank-nicolson'}
+        Time discretization for deterministic equations.
+    scores : list of str, optional
+        List of tallies to score in addition to the mandatory flux and
+        source strength. Additional scores include
+        {'source-x', 'source-y', 'source-z', 'fission-power'} (default empty list).
+
+    Returns
+    -------
+        None (in-place card alterations).
+
+    Notes
+    -----
+    """
+
+    card = global_.input_deck.technique
+    card["LOSM"] = True
+    card["losm"]["time_discretization"] = time_discretization
+    card["losm"]["space_discretization"] = space_discretization
+
+    # Set mesh
+    if g is not None:
+        card["losm"]["mesh"]["g"] = g
+    if t is not None:
+        card["losm"]["mesh"]["t"] = t
+    if x is not None:
+        card["losm"]["mesh"]["x"] = x
+    if y is not None:
+        card["losm"]["mesh"]["y"] = y
+    if z is not None:
+        card["losm"]["mesh"]["z"] = z
+
+    ax_expand = []
+    if g is None:
+        ax_expand.append(0)
+    if t is None:
+        ax_expand.append(1)
+    if x is None:
+        ax_expand.append(2)
+    if y is None:
+        ax_expand.append(3)
+    if z is None:
+        ax_expand.append(4)
+    for ax in ax_expand:
+        if fixed_source is not None:
+            fixed_source = np.expand_dims(fixed_source, axis=ax)
+
+    score_list = card["losm"]["score_list"]
+    for name in scores:
+        score_list[name] = True
+
+
+    card["losm"]["source"] = source0
+    card["losm"]["fixed_source"] = fixed_source
 
 def weight_window(
     x=np.array([-INF, INF]),
@@ -1350,145 +1439,32 @@ def weight_window(
     method_checked = check_support(
         "Weight window method",
         method,
-        ["user", "previous", "alpha", "dmd"],
+        ["user", "previous", "alpha", "dmd","hybrid"],
     )
     if method_checked == "user":
         card["ww"]["auto"] = WW_USER
+        
     elif method_checked == "previous":
         card["ww"]["auto"] = WW_PREVIOUS
-
-        scores = (["flux"],)
-        # Make tally card
-        tcard = MeshTallyCard()
-
-        # Set ID
-        tcard.ID = len(global_.input_deck.mesh_tallies)
-        card["ww"]["tally_idx"] = tcard.ID
-
-        # Set mesh
-        tcard.x = x
-        tcard.y = y
-        tcard.z = z
-
-        # Set other filters
-        tcard.t = t
-        tcard.mu = mu
-        tcard.azi = azi
-
-        # Set energy group grid
-        if type(g) == type("string") and g == "all":
-            G = global_.input_deck.materials[0].G
-            tcard.g = np.linspace(0, G, G + 1) - 0.5
-        else:
-            tcard.g = g
-        if global_.input_deck.setting["mode_CE"]:
-            tcard.g = E
-
-        # Calculate total number bins
-        Nx = len(tcard.x) - 1
-        Ny = len(tcard.y) - 1
-        Nz = len(tcard.z) - 1
-        Nt = len(tcard.t) - 1
-        Nmu = len(tcard.mu) - 1
-        N_azi = len(tcard.azi) - 1
-        Ng = len(tcard.g) - 1
-        tcard.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
-        tcard.scores.append("flux")
-        # Add to deck
-        global_.input_deck.mesh_tallies.append(tcard)
 
     elif method_checked == "alpha":
         card["ww"]["auto"] = WW_ALPHA
 
-        scores = (["flux"],)
-        # Make tally card
-        tcard = MeshTallyCard()
-
-        # Set ID
-        tcard.ID = len(global_.input_deck.mesh_tallies)
-        card["ww"]["tally_idx"] = tcard.ID
-
-        # Set mesh
-        tcard.x = x
-        tcard.y = y
-        tcard.z = z
-
-        # Set other filters
-        tcard.t = t
-        tcard.mu = mu
-        tcard.azi = azi
-
-        # Set energy group grid
-        if type(g) == type("string") and g == "all":
-            G = global_.input_deck.materials[0].G
-            tcard.g = np.linspace(0, G, G + 1) - 0.5
-        else:
-            tcard.g = g
-        if global_.input_deck.setting["mode_CE"]:
-            tcard.g = E
-
-        # Calculate total number bins
-        Nx = len(tcard.x) - 1
-        Ny = len(tcard.y) - 1
-        Nz = len(tcard.z) - 1
-        Nt = len(tcard.t) - 1
-        Nmu = len(tcard.mu) - 1
-        N_azi = len(tcard.azi) - 1
-        Ng = len(tcard.g) - 1
-        tcard.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
-        tcard.scores.append("flux")
-        # Add to deck
-        global_.input_deck.mesh_tallies.append(tcard)
-
     elif method_checked == "dmd":
         card["ww"]["auto"] = WW_DMD
 
-        scores = (["flux"],)
-        # Make tally card
-        tcard = MeshTallyCard()
-
-        # Set ID
-        tcard.ID = len(global_.input_deck.mesh_tallies)
-        card["ww"]["tally_idx"] = tcard.ID
-
-        # Set mesh
-        tcard.x = x
-        tcard.y = y
-        tcard.z = z
-
-        # Set other filters
-        tcard.t = t
-        tcard.mu = mu
-        tcard.azi = azi
-
-        # Set energy group grid
-        if type(g) == type("string") and g == "all":
-            G = global_.input_deck.materials[0].G
-            tcard.g = np.linspace(0, G, G + 1) - 0.5
-        else:
-            tcard.g = g
-        if global_.input_deck.setting["mode_CE"]:
-            tcard.g = E
-
-        # Calculate total number bins
-        Nx = len(tcard.x) - 1
-        Ny = len(tcard.y) - 1
-        Nz = len(tcard.z) - 1
-        Nt = len(tcard.t) - 1
-        Nmu = len(tcard.mu) - 1
-        N_azi = len(tcard.azi) - 1
-        Ng = len(tcard.g) - 1
-        tcard.N_bin = Nx * Ny * Nz * Nt * Nmu * N_azi * Ng
-        tcard.scores.append("flux")
-        # Add to deck
-        global_.input_deck.mesh_tallies.append(tcard)
+    elif method_checked == "hybrid":
+        card["ww"]["auto"] = WW_HYBRID
 
     # Checking techniques
     for mod in modifications:
         mod_checked = check_support(
             "Weight window modification",
             mod[0],
-            ["min-center", "wollaber", "n-snapshot", "filter"],
+            ["min-center", 
+             "wollaber", 
+             "n-snapshot", 
+             "filter",]
         )
         if mod_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = mod[1]
@@ -1516,16 +1492,15 @@ def weight_window(
     if type(g) == type("string") and g == "all":
         G = global_.input_deck.materials[0].G
         card["ww"]["mesh"]["g"] = np.linspace(0, G, G + 1) - 0.5
-    else:
-        tcard.g = g
+
     if global_.input_deck.setting["mode_CE"]:
         card["ww"]["mesh"]["g"] = E
 
     if window is None:
-        window = np.ones((Nt, Nx, Ny, Nz))
+        window = np.ones((len(t)-1, len(x)-1, len(y)-1, len(z)-1))
 
     card["ww"]["center"] = window
-    return card, tcard
+    return card
 
 
 def domain_decomposition(
