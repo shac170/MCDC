@@ -750,6 +750,75 @@ def dd_meshtally(input_deck):
         Nz = MPI.COMM_WORLD.allreduce(Nz, MPI.MAX)
     return Nx, Ny, Nz
 
+def make_type_census_tally(input_deck):
+    global census_tally
+    struct = []
+
+    # Maximum numbers of mesh and filter grids and scores
+    Nmax_x = 2
+    Nmax_y = 2
+    Nmax_z = 2
+    Nmax_t = 2
+    Nmax_mu = 2
+    Nmax_azi = 2
+    Nmax_g = 2
+    Nmax_score = 1
+    for card in input_deck.census_tallies:
+        Nmax_x = max(Nmax_x, len(card.x))
+        Nmax_y = max(Nmax_y, len(card.y))
+        Nmax_z = max(Nmax_z, len(card.z))
+        Nmax_t = max(Nmax_t, len(card.t))
+        Nmax_mu = max(Nmax_mu, len(card.mu))
+        Nmax_azi = max(Nmax_azi, len(card.azi))
+        Nmax_g = max(Nmax_g, len(card.g))
+        Nmax_score = max(Nmax_score, len(card.scores))
+
+    # reduce tally sizes for subdomains
+    if input_deck.technique["domain_decomposition"]:
+        Nmax_x, Nmax_y, Nmax_z = dd_meshtally(input_deck)
+
+    # Set the filter
+    filter_ = [
+        ("x", float64, (Nmax_x,)),
+        ("y", float64, (Nmax_y,)),
+        ("z", float64, (Nmax_z,)),
+        ("t", float64, (Nmax_t,)),
+        ("mu", float64, (Nmax_mu,)),
+        ("azi", float64, (Nmax_azi,)),
+        ("g", float64, (Nmax_g,)),
+        ("Nx", int64),
+        ("Ny", int64),
+        ("Nz", int64),
+        ("Nt", int64),
+        ("Nmu", int64),
+        ("N_azi", int64),
+        ("Ng", int64),
+    ]
+    struct += [("filter", filter_)]
+
+    # Tally strides
+    stride = [
+        ("tally", int64),
+        ("sensitivity", int64),
+        ("mu", int64),
+        ("azi", int64),
+        ("g", int64),
+        ("t", int64),
+        ("x", int64),
+        ("y", int64),
+        ("z", int64),
+    ]
+    struct += [("stride", stride)]
+
+    # Total number of bins
+    struct += [("N_bin", int64)]
+
+    # Scores
+    struct += [("N_score", int64), ("scores", int64, (Nmax_score,))]
+
+    # Make tally structure
+    census_tally = into_dtype(struct)
+
 
 def make_type_mesh_tally(input_deck):
     global mesh_tally
@@ -820,6 +889,74 @@ def make_type_mesh_tally(input_deck):
     # Make tally structure
     mesh_tally = into_dtype(struct)
 
+def make_type_edge_tally(input_deck):
+    global edge_tally
+    struct = []
+
+    # Maximum numbers of mesh and filter grids and scores
+    Nmax_x = 2
+    Nmax_y = 2
+    Nmax_z = 2
+    Nmax_t = 2
+    Nmax_mu = 2
+    Nmax_azi = 2
+    Nmax_g = 2
+    Nmax_score = 1
+    for card in input_deck.edge_tallies:
+        Nmax_x = max(Nmax_x, len(card.x)+1) 
+        Nmax_y = max(Nmax_y, len(card.y))
+        Nmax_z = max(Nmax_z, len(card.z))
+        Nmax_t = max(Nmax_t, len(card.t))
+        Nmax_mu = max(Nmax_mu, len(card.mu)) 
+        Nmax_azi = max(Nmax_azi, len(card.azi)) 
+        Nmax_g = max(Nmax_g, len(card.g)) 
+        Nmax_score = max(Nmax_score, len(card.scores)) 
+
+    # reduce tally sizes for subdomains
+    if input_deck.technique["domain_decomposition"]:
+        Nmax_x, Nmax_y, Nmax_z = dd_meshtally(input_deck)
+
+    # Set the filter
+    filter_ = [
+        ("x", float64, (Nmax_x,)),
+        ("y", float64, (Nmax_y,)),
+        ("z", float64, (Nmax_z,)),
+        ("t", float64, (Nmax_t,)),
+        ("mu", float64, (Nmax_mu,)),
+        ("azi", float64, (Nmax_azi,)),
+        ("g", float64, (Nmax_g,)),
+        ("Nx", int64),
+        ("Ny", int64),
+        ("Nz", int64),
+        ("Nt", int64),
+        ("Nmu", int64),
+        ("N_azi", int64),
+        ("Ng", int64),
+    ]
+    struct += [("filter", filter_)]
+
+    # Tally strides
+    stride = [
+        ("tally", int64),
+        ("sensitivity", int64),
+        ("mu", int64),
+        ("azi", int64),
+        ("g", int64),
+        ("t", int64),
+        ("x", int64),
+        ("y", int64),
+        ("z", int64),
+    ]
+    struct += [("stride", stride)]
+
+    # Total number of bins
+    struct += [("N_bin", int64)]
+
+    # Scores
+    struct += [("N_score", int64), ("scores", int64, (Nmax_score,))]
+
+    # Make tally structure
+    edge_tally = into_dtype(struct)
 
 def make_type_surface_tally(input_deck):
     global surface_tally
@@ -1590,6 +1727,8 @@ def make_type_global(input_deck):
             ("lattices", lattice, (N_lattice,)),
             ("sources", source, (N_source,)),
             ("mesh_tallies", mesh_tally, (N_mesh_tally,)),
+            ("census_tallies", mesh_tally, (N_mesh_tally,)),
+            ("edge_tallies", mesh_tally, (N_mesh_tally,)),
             ("surface_tallies", surface_tally, (N_surface_tally,)),
             ("cell_tallies", cell_tally, (N_cell_tally,)),
             ("cs_tallies", cs_tally, (N_cs_tally,)),

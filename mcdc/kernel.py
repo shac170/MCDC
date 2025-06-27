@@ -22,7 +22,7 @@ from mcdc.constant import *
 from mcdc.print_ import print_error, print_msg
 from mcdc.src.algorithm import binary_search, binary_search_with_length
 
-from mcdc.losm.losm_kernel import losm_create_problem, losm_create_state, losm_step_time, losm_average_state, losm_convert_moments
+from mcdc.losm.losm_kernel import losm_create_problem, losm_FV_step_time,  losm_FE_step_time,  losm_convert_moments,reconstruct_from_state
 
 
 @njit
@@ -2010,7 +2010,14 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
                 x1 = x + distance_scored * ux
                 score = (P["w"]* P['ux'] * P['ux']/ ux*((0.5 * (x1**2 - x**2)- ((mesh["x"][ix + 1] + mesh["x"][ix]) / 2) * (x1 - x))
                         * (0.5 * (t1**2 - t**2)- ((mesh["t"][it + 1] + mesh["t"][it]) / 2) * (t1 - t))))
-                
+            elif score_type == SCORE_F1:
+                t1 = t + distance_scored * ut
+                score = P["w"]* (1/3-P['ux'] * P['ux']) * (mesh["t"][it + 1] * (t1 - t) - 0.5 * (t1**2 - t**2))
+
+            elif score_type == SCORE_F3:
+                t1 = t + distance_scored * ut
+                score = P["w"]* (1/3-P['ux'] * P['ux']) * (0.5 * (t1**2 - t**2) - mesh["t"][it] * (t1 - t))
+
             adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
 
         # Accumulate distance swept
@@ -2062,6 +2069,244 @@ def score_mesh_tally(P_arr, distance, tally, data, mcdc):
                 break
             idx += stride["t"]
 
+def score_census_tally(P_arr, tally, data, mcdc):
+    P = P_arr[0]
+    tally_bin = data[TALLY]
+    mesh = tally["filter"]
+    stride = tally["stride"]
+
+    # Particle 4D direction
+    ux = P["ux"]
+    uy = P["uy"]
+    uz = P["uz"]
+    ut = 1.0# / physics.get_speed(P_arr, mcdc)
+
+    # Particle initial and final coordinate
+    x = P["x"]
+    y = P["y"]
+    z = P["z"]
+    t = P["t"]
+
+
+    # Easily identified tally bin indices
+    mu, azi = mesh_get_angular_index(P_arr, mesh)
+    g, outside_energy = mesh_get_energy_index(P_arr, mesh, mcdc["setting"]["mode_MG"])
+
+    # Get starting indices
+    ix, iy, iz, it, outside = mesh_.structured.get_indices(P_arr, mesh)
+    it-=1
+    # Outside grid?
+    if outside or outside_energy:
+        return
+
+    # The tally index
+    idx = (
+        stride["tally"]
+        + mu * stride["mu"]
+        + azi * stride["azi"]
+        + g * stride["g"]
+        + it * stride["t"]
+        + ix * stride["x"]
+        + iy * stride["y"]
+        + iz * stride["z"]
+    )
+
+    # Score
+    flux = P["w"]
+    for i in range(tally["N_score"]):
+        score_type = tally["scores"][i]
+        score = 0
+        if score_type == SCORE_FLUX:
+            score = flux
+        elif score_type == SCORE_DENSITY:
+            score = flux * ut
+        elif score_type == SCORE_TRACKS:
+            score = 1
+        elif score_type == SCORE_NET_CURRENT:
+            score = flux * P['ux']
+
+        elif score_type == SCORE_SECOND_MOMENT:
+            score = flux * P['ux'] * P['ux']
+
+        adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
+
+def score_edge_tally(P_arr, distance, tally, data, mcdc):
+    P = P_arr[0]
+    tally_bin = data[TALLY]
+    material = mcdc["materials"][P["material_ID"]]
+    mesh = tally["filter"]
+    stride = tally["stride"]
+
+    # Particle 4D direction
+    ux = P["ux"]
+    uy = P["uy"]
+    uz = P["uz"]
+    ut = 1.0 / physics.get_speed(P_arr, mcdc)
+
+    # Particle initial and final coordinate
+    x = P["x"]
+    y = P["y"]
+    z = P["z"]
+    t = P["t"]
+    x_final = x + ux * distance
+    y_final = y + uy * distance
+    z_final = z + uz * distance
+    t_final = t + ut * distance
+
+    # Easily identified tally bin indices
+    mu, azi = mesh_get_angular_index(P_arr, mesh)
+    g, outside_energy = mesh_get_energy_index(P_arr, mesh, mcdc["setting"]["mode_MG"])
+
+    # Get starting indices
+    ix, iy, iz, it, outside = mesh_.structured.get_indices(P_arr, mesh)
+    
+    # Outside grid?
+    if outside or outside_energy:
+        return
+    idx = (
+    stride["tally"]
+    + mu * stride["mu"]
+    + azi * stride["azi"]
+    + g * stride["g"]
+    + it * stride["t"]
+    + ix * stride["x"]
+    + iy * stride["y"]
+    + iz * stride["z"]
+    )
+    # Sweep through the distance
+    distance_swept = 0.0
+    while distance_swept < distance - COINCIDENCE_TOLERANCE:
+        # Find distances to the mesh grids
+        if ux == 0.0:
+            dx = INF
+        else:
+            if ux > 0.0:
+                x_next = min(mesh["x"][ix + 1], x_final)
+            else:
+                x_next = max(mesh["x"][ix], x_final)
+            dx = (x_next - x) / ux
+        if uy == 0.0:
+            dy = INF
+        else:
+            if uy > 0.0:
+                y_next = min(mesh["y"][iy + 1], y_final)
+            else:
+                y_next = max(mesh["y"][iy], y_final)
+            dy = (y_next - y) / uy
+        if uz == 0.0:
+            dz = INF
+        else:
+            if uz > 0.0:
+                z_next = min(mesh["z"][iz + 1], z_final)
+            else:
+                z_next = max(mesh["z"][iz], z_final)
+            dz = (z_next - z) / uz
+        dt = (min(mesh["t"][it + 1], t_final) - t) / ut
+
+        # Get the grid crossed
+        distance_scored = INF
+        mesh_crossed = MESH_NONE
+        if dx <= distance_scored:
+            mesh_crossed = MESH_X
+            distance_scored = dx
+        if dy <= distance_scored:
+            mesh_crossed = MESH_Y
+            distance_scored = dy
+        if dz <= distance_scored:
+            mesh_crossed = MESH_Z
+            distance_scored = dz
+        if dt <= distance_scored:
+            mesh_crossed = MESH_T
+            distance_scored = dt
+
+
+
+    
+
+
+        next_pos = x + distance_scored * ux
+        arr = mesh["x"]-next_pos
+        idx_arr = np.argmin(np.abs(mesh["x"]-next_pos))
+        if np.abs(np.min(np.abs(mesh["x"]-next_pos)))< COINCIDENCE_TOLERANCE:
+            #print("SCORE",idx_arr,next_pos,mesh["x"][idx_arr])
+            idx = (
+            stride["tally"]
+            + mu * stride["mu"]
+            + azi * stride["azi"]
+            + g * stride["g"]
+            + it * stride["t"]
+            + idx_arr * stride["x"]
+            + iy * stride["y"]
+            + iz * stride["z"]
+            )
+
+            flux = P["w"]/abs(ux)
+
+            for i in range(tally["N_score"]):
+                score_type = tally["scores"][i]
+                score = 0
+                if score_type == SCORE_FLUX:
+                    score = flux
+                elif score_type == SCORE_NET_CURRENT:
+                    score = flux * P['ux']
+                elif score_type == SCORE_SECOND_MOMENT:
+                    score = flux * P['ux'] * P['ux']
+                elif score_type == SCORE_F0:
+                    score = (mesh["t"][it+1]-t)#*(1/3 - P['ux'] * P['ux'])*flux
+                    score *= (1/3 - P['ux'] * P['ux'])*flux
+                elif score_type == SCORE_F2:
+                    score = (t-mesh["t"][it])#*(1/3 - P['ux'] * P['ux'])*flux
+                    score *= (1/3 - P['ux'] * P['ux'])*flux
+                adapt.global_add(tally_bin, (TALLY_SCORE, idx + i), round(score))
+            
+
+        distance_swept += distance_scored
+
+        # Move the 4D position
+        x += distance_scored * ux
+        y += distance_scored * uy
+        z += distance_scored * uz
+        t += distance_scored * ut
+
+        # Increment index and check if out of bound
+        if mesh_crossed == MESH_X:
+            if ux > 0.0:
+                ix += 1
+                if ix == mesh["Nx"]:
+                    break
+                idx += stride["x"]
+            else:
+                ix -= 1
+                if ix == -1:
+                    break
+                idx -= stride["x"]
+        if mesh_crossed == MESH_Y:
+            if uy > 0.0:
+                iy += 1
+                if iy == mesh["Ny"]:
+                    break
+                idx += stride["y"]
+            else:
+                iy -= 1
+                if iy == -1:
+                    break
+                idx -= stride["y"]
+        elif mesh_crossed == MESH_Z:
+            if uz > 0.0:
+                iz += 1
+                if iz == mesh["Nz"]:
+                    break
+                idx += stride["z"]
+            else:
+                iz -= 1
+                if iz == -1:
+                    break
+                idx -= stride["z"]
+        elif mesh_crossed == MESH_T:
+            it += 1
+            if it == mesh["Nt"]:
+                break
+            idx += stride["t"]
 
 @njit
 def score_surface_tally(P_arr, surface, tally, data, mcdc):
@@ -2895,6 +3140,9 @@ def move_to_event(P_arr, data, mcdc):
         for tally in mcdc["mesh_tallies"]:
             score_mesh_tally(P_arr, distance, tally, data, mcdc)
 
+        for tally in mcdc["edge_tallies"]:
+            score_edge_tally(P_arr, distance, tally, data, mcdc)
+
         # Cell tallies
         cell = mcdc["cells"][P["cell_ID"]]
         for i in range(cell["N_tally"]):
@@ -3676,7 +3924,7 @@ def weight_window(P_arr, prog):
         else:
             P["w"] = w_target
 
-def save_weight_window_data(name, data):
+def save_weight_window_data(name, data,file = "ww_data.h5"):
     """
     Appends or creates a dataset in ww_data.h5 for the given named quantity.
 
@@ -3687,7 +3935,7 @@ def save_weight_window_data(name, data):
     - out_dir (str): Directory to save the HDF5 file (default is current)
     """
     data = np.squeeze(data)
-    with h5py.File("ww_data.h5", "a") as f:
+    with h5py.File(file, "a") as f:
         if name not in f:
             maxshape = (None, data.shape[0])  # Unlimited rows, fixed width
             dset = f.create_dataset(name, data=np.expand_dims(data, axis=0),maxshape=maxshape,chunks=True)
@@ -3703,41 +3951,43 @@ def update_weight_windows(data, mcdc):
     idx_census = mcdc["idx_census"]
 
     # initialize ww_data file
-    if idx_census == 1:
-        with h5py.File("ww_data.h5", "w") as f:
+    if idx_census == 0:
+        if os.path.isfile(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"):
+            os.system("rm -rf "+str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "w") as f:
             f.close()
 
-    center = np.copy(mcdc["technique"]["ww"]["center"][idx_census + 1])
+    center = np.copy(mcdc["technique"]["ww"]["center"][idx_census])
     epsilon = mcdc["technique"]["ww"]["epsilon"]
     if mcdc["technique"]["ww"]["auto"] == WW_USER:
         return
 
     elif mcdc["technique"]["ww"]["auto"] == WW_PREVIOUS:
         center = ww_previous(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+        mcdc["technique"]["ww"]["center"][idx_census] = center
 
     elif mcdc["technique"]["ww"]["auto"] == WW_ALPHA:
         center = ww_alpha(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+        mcdc["technique"]["ww"]["center"][idx_census] = center
 
     elif mcdc["technique"]["ww"]["auto"] == WW_DMD:
         center = ww_dmd(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+        mcdc["technique"]["ww"]["center"][idx_census] = center
 
     elif mcdc["technique"]["ww"]["auto"] == WW_HYBRID:
         center = ww_hybrid(data, mcdc)
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = center
+        mcdc["technique"]["ww"]["center"][idx_census] = center
 
-    mcdc["technique"]["ww"]["center"][idx_census + 1] /= np.max(
-        mcdc["technique"]["ww"]["center"][idx_census + 1]
+    mcdc["technique"]["ww"]["center"][idx_census] /= np.max(
+        mcdc["technique"]["ww"]["center"][idx_census]
     )
     if epsilon[WW_MIN] > 0:
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-            mcdc["technique"]["ww"]["center"][idx_census + 1]
+        mcdc["technique"]["ww"]["center"][idx_census] = (
+            mcdc["technique"]["ww"]["center"][idx_census]
             * (1 - epsilon[WW_MIN])
             + epsilon[WW_MIN]
         )
-        arr = mcdc["technique"]["ww"]["center"][idx_census + 1]
+        arr = mcdc["technique"]["ww"]["center"][idx_census]
         for i in range(arr.shape[0]):
             for j in range(arr.shape[1]):
                 for k in range(arr.shape[2]):
@@ -3745,23 +3995,24 @@ def update_weight_windows(data, mcdc):
                         arr[i, j, k] = epsilon[WW_MIN]
     if epsilon[WW_WOLLABER1] > 0:
         w_min = epsilon[WW_WOLLABER2]
-        mcdc["technique"]["ww"]["center"][idx_census + 1] = (
-            mcdc["technique"]["ww"]["center"][idx_census + 1]
+        mcdc["technique"]["ww"]["center"][idx_census] = (
+            mcdc["technique"]["ww"]["center"][idx_census]
         ) * (
             1
             + (1 / epsilon[WW_WOLLABER1] - 1)
             * np.exp(
-                -(mcdc["technique"]["ww"]["center"][idx_census + 1] - w_min)
+                -(mcdc["technique"]["ww"]["center"][idx_census] - w_min)
                 / epsilon[WW_WOLLABER1]
             )
         )
-    save_weight_window_data("window_center",mcdc["technique"]["ww"]["center"][idx_census + 1])
+    file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"
+    save_weight_window_data("window_center",mcdc["technique"]["ww"]["center"][idx_census],file = file)
     return
 
-def get_tally(idx, mcdc, data, score):
+def get_tally(idx, mcdc, data, score,type="mesh"):
     # Determine the correct tally list based on tally_type
     # Mesh tallies
-    for ID, tally in enumerate(mcdc["mesh_tallies"]):
+    for ID, tally in enumerate(mcdc[type+"_tallies"]):
         if mcdc["technique"]["iQMC"]:
             break
 
@@ -3769,6 +4020,8 @@ def get_tally(idx, mcdc, data, score):
 
         # Get grid
         Nx = mesh["Nx"]
+        if type == "edge":
+            Nx += 1
         Ny = mesh["Ny"]
         Nz = mesh["Nz"]
         Nt = mesh["Nt"]
@@ -3783,8 +4036,8 @@ def get_tally(idx, mcdc, data, score):
         grid_mu = mesh["mu"][: Nmu + 1]
         grid_azi = mesh["azi"][: N_azi + 1]
         grid_g = mesh["g"][: Ng + 1]
-        dx = grid_x[:-1] - grid_x[1:]
-        dt = grid_t[:-1] - grid_t[1:]
+        dx = grid_x[1:] - grid_x[:-1]
+        dt = grid_t[1:] - grid_t[:-1]
         # Set tally shape
         N_score = tally["N_score"]
         if mcdc["technique"]["domain_decomposition"]:
@@ -3818,7 +4071,13 @@ def get_tally(idx, mcdc, data, score):
                 mean = score_tally_bin[TALLY_SUM]
 
         N_particle = mcdc["setting"]["N_particle"]
-        scaled_tally = mean[idx][:]/(N_particle*dx*dt[0])
+        if type == "mesh":
+            scaled_tally = mean[idx][:]/(N_particle*dx*dt[0])
+        elif type == "edge":
+            scaled_tally = mean[idx][:]/(N_particle*dt[0])
+        elif type == "census":
+            scaled_tally = mean[idx][:]/(N_particle*dx)
+            
         return scaled_tally #mean[idx][:]#, sdev[idx][:]
 
 
@@ -3832,20 +4091,23 @@ def ww_previous(data, mcdc):
     Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
     Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
     Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
-    old_flux = get_tally(idx_census, mcdc, data, SCORE_FLUX)
-    ax_expand = []
-    if Nx == 1:
-        ax_expand.append(0)
-    if Ny == 1:
-        ax_expand.append(1)
-    if Nz == 1:
-        ax_expand.append(2)
-    for ax in ax_expand:
-        old_flux = np.expand_dims(old_flux, axis=ax)
-    if epsilon[WW_FILTER1] > 0:
-        old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
-    center = old_flux
-    save_weight_window_data("lagged_solution",old_flux)
+    center = np.ones((Nx,1,1))
+    if idx_census > 0:
+        old_flux = get_tally(idx_census-1, mcdc, data, SCORE_FLUX)
+        ax_expand = []
+        if Nx == 1:
+            ax_expand.append(0)
+        if Ny == 1:
+            ax_expand.append(1)
+        if Nz == 1:
+            ax_expand.append(2)
+        for ax in ax_expand:
+            old_flux = np.expand_dims(old_flux, axis=ax)
+        if epsilon[WW_FILTER1] > 0:
+            old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
+        center = old_flux
+        save_weight_window_data("lagged_solution",old_flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+
     return center
 
 
@@ -3854,37 +4116,41 @@ def ww_alpha(data, mcdc):
     # accessing most recent two tally dumps
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
-    epsilon = mcdc["technique"]["ww"]["epsilon"]
-    flux1 =  get_tally(idx_census, mcdc, data, SCORE_FLUX)#/ (dx * dt)
-    flux2 =  get_tally(idx_census-1, mcdc, data, SCORE_FLUX)#/ (dx * dt)
-
+    epsilon = mcdc["technique"]["ww"]["epsilon"]        
     Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
     Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
     Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
+    if idx_census > 1:
+        flux1 =  get_tally(idx_census-1, mcdc, data, SCORE_FLUX)#/ (dx * dt)
+        flux2 =  get_tally(idx_census-2, mcdc, data, SCORE_FLUX)#/ (dx * dt)
 
-    ax_expand = []
-    if Nx == 1:
-        ax_expand.append(0)
-    if Ny == 1:
-        ax_expand.append(1)
-    if Nz == 1:
-        ax_expand.append(2)
-    for ax in ax_expand:
-        flux1 = np.expand_dims(flux1, axis=ax)
-        flux2 = np.expand_dims(flux2, axis=ax)
-    dt = (
-        mcdc["setting"]["census_time"][idx_census]
-        - mcdc["setting"]["census_time"][idx_census - 1]
-    )
-    if epsilon[WW_FILTER1] > 0:
-        flux1 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux1)
-        flux2 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux2)
-    # Computing alpha
-    alpha = (1 / dt) * np.log(np.abs(flux1 / flux2))
-    alpha[flux2 == 0] = 1 / dt
-    alpha[alpha > 3] = 2
 
-    center = flux1 * np.exp(alpha * dt)
+
+        ax_expand = []
+        if Nx == 1:
+            ax_expand.append(0)
+        if Ny == 1:
+            ax_expand.append(1)
+        if Nz == 1:
+            ax_expand.append(2)
+        for ax in ax_expand:
+            flux1 = np.expand_dims(flux1, axis=ax)
+            flux2 = np.expand_dims(flux2, axis=ax)
+        dt = (
+            mcdc["setting"]["census_time"][idx_census]
+            - mcdc["setting"]["census_time"][idx_census - 1]
+        )
+        if epsilon[WW_FILTER1] > 0:
+            flux1 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux1)
+            flux2 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux2)
+        # Computing alpha
+        alpha = (1 / dt) * np.log(np.abs(flux1 / flux2))
+        alpha[flux2 == 0] = 1 / dt
+        alpha[alpha > 3] = 2
+
+        center = flux1 * np.exp(alpha * dt)
+    else:
+        center = np.zeros(Nx)
     return center
 
 
@@ -3911,7 +4177,7 @@ def ww_dmd(data, mcdc):
             snapshots = []
             for n in range(n_snapshot):
                     
-                flux = get_tally(idx_census-n, mcdc, data, SCORE_FLUX)# / (dx * dt)
+                flux = get_tally(idx_census-1-n, mcdc, data, SCORE_FLUX)# / (dx * dt)
 
                 if epsilon[WW_FILTER1] > 0:
                     flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux)
@@ -3958,6 +4224,220 @@ def ww_dmd(data, mcdc):
             center = np.ones_like(mcdc["technique"]["ww"]["center"][idx_census])
     return center
 
+def get_hybrid_ics(data,mcdc):
+    # accessing most recent tally dump
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    space_scheme = epsilon[WW_SPACE_DISC] 
+    initial_conditions = epsilon[WW_HYBRID_IC]
+    if space_scheme == HYBRID_FV:
+        time_scheme = epsilon[WW_TIME_DISC] 
+
+    mesh_x = mcdc["technique"]["ww"]["mesh"]["x"]
+    t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census-1]
+    t1 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
+    Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+
+    if space_scheme == HYBRID_FE:
+        # first timestep 0 initial condition
+        if idx_census == 0:
+            flux = np.zeros((4,Nx))
+            current = np.zeros((4,Nx))
+        else:
+            if initial_conditions == HYBRID_IC_MC_MESH: # Monte Carlo initial conditions
+                # Load previous timestep tally data
+                # Flux and moments
+                old_flux = get_tally(idx_census-1, mcdc, data, SCORE_FLUX)
+                old_flux_t = get_tally(idx_census-1, mcdc, data, SCORE_FLUX_MT)
+                old_flux_x = get_tally(idx_census-1, mcdc, data, SCORE_FLUX_MX)
+                old_flux_tx = get_tally(idx_census-1, mcdc, data, SCORE_FLUX_MTX)
+                
+                old_current = get_tally(idx_census-1, mcdc, data, SCORE_NET_CURRENT)
+                old_current_t = get_tally(idx_census-1, mcdc, data, SCORE_CURRENT_MT)
+                old_current_x = get_tally(idx_census-1, mcdc, data, SCORE_CURRENT_MX)
+                old_current_tx = get_tally(idx_census-1, mcdc, data, SCORE_CURRENT_MTX)
+                
+                if epsilon[WW_FILTER1] > 0:
+                    old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
+                    old_flux_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_x)
+                    old_flux_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_t)
+                    old_flux_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_tx)
+                    old_current = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current)
+                    old_current_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_x)
+                    old_current_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_t)
+                    old_current_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_tx)
+
+                flux = losm_convert_moments(old_flux,old_flux_x,old_flux_t,old_flux_tx,mesh_x,t0,t1)
+                current = losm_convert_moments(old_current,old_current_x,old_current_t,old_current_tx,mesh_x,t0,t1)
+
+            elif initial_conditions == HYBRID_IC_HYBRID: # full hybrid initial conditions
+                flux = np.zeros((4,Nx))
+                current = np.zeros((4,Nx))
+                with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "r") as f:
+                    flux[0,:] = np.copy(f["soln_flux.0"][-1,:])
+                    flux[1,:]= np.copy(f["soln_flux.1"][-1,:])
+                    flux[2,:] = np.copy(f["soln_flux.2"][-1,:])
+                    flux[3,:] = np.copy(f["soln_flux.3"][-1,:])
+
+                    current[0,:] = np.copy(f["soln_current.0"][-1,:])
+                    current[1,:] = np.copy(f["soln_current.1"][-1,:])
+                    current[2,:] = np.copy(f["soln_current.2"][-1,:])
+                    current[3,:] = np.copy(f["soln_current.3"][-1,:])
+
+        # creating a state with the gathered corner values            
+        old_state = np.zeros(Nx*8)
+        for i in range(Nx):
+            for i1 in range(4):
+                old_state[i*8+i1] = flux[i1,i]
+            for i2 in range(4):
+                old_state[i*8+4+i2] = current[i2,i]
+
+        # saving initial conditions
+        save_weight_window_data("IC_flux.0",flux[0,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_flux.1",flux[1,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_flux.2",flux[2,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_flux.3",flux[3,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_current.0",current[0,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_current.1",current[1,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_current.2",current[2,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_current.3",current[3,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+
+    elif space_scheme == HYBRID_FV:
+        print("gettin ics")
+        # first timestep 0 initial condition
+        if idx_census == 0:
+            old_flux = np.zeros((Nx+2))
+            old_current = np.zeros((Nx+1))
+        else:
+            if initial_conditions == HYBRID_IC_MC_MESH: # Monte Carlo initial conditions
+                # Load previous timestep tally data
+                # Flux and moments
+                flux = get_tally(idx_census-1, mcdc, data, SCORE_FLUX,type="census")
+                current = get_tally(idx_census-1, mcdc, data, SCORE_NET_CURRENT,type="census")
+
+                if epsilon[WW_FILTER1] > 0:
+                    flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], flux)
+                    current = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], current)
+                # creating a state
+                old_flux = np.zeros(Nx+2)
+                old_current = np.zeros(Nx+1)
+                old_flux[1:-1] = flux
+                old_flux[0] = old_flux[1]
+                old_flux[-1] = old_flux[-2]
+                old_current [1:-1] = (current[1:]+current[:-1])/2
+                old_current[-1] = old_current[-2]
+                old_current[0] = old_current[1]
+                          
+            elif initial_conditions == HYBRID_IC_HYBRID: # full hybrid initial conditions
+                old_flux = np.zeros((Nx+2))
+                old_current = np.zeros((Nx+1))
+                with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "r") as f:
+                    old_flux[:] = np.copy(f["soln_flux_mean"][-1,:])
+                    old_current[:] = np.copy(f["soln_current_mean"][-1,:])
+                 
+        old_state = old_flux, old_current
+        # saving initial conditions
+
+        save_weight_window_data("IC_flux",old_flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("IC_current",old_current,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+
+    return old_state
+
+def get_hybrid_closure(data,mcdc):
+    # accessing most recent tally dump
+    idx_batch = mcdc["idx_batch"]
+    idx_census = mcdc["idx_census"]
+    epsilon = mcdc["technique"]["ww"]["epsilon"]
+    space_scheme = epsilon[WW_SPACE_DISC] 
+    initial_conditions = epsilon[WW_HYBRID_IC]
+    if space_scheme == HYBRID_FV:
+        time_scheme = epsilon[WW_TIME_DISC] 
+    mesh_x = mcdc["technique"]["ww"]["mesh"]["x"]
+    t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census-1]
+    t1 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
+    Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
+
+    if space_scheme == HYBRID_FE:
+        # Load previous timestep tally data
+        # Flux and moments
+
+        F0 = get_tally(idx_census-1, mcdc, data, SCORE_F0,"edge")
+        F1 = get_tally(idx_census-1, mcdc, data, SCORE_F1,"mesh")
+        F2 = get_tally(idx_census-1, mcdc, data, SCORE_F2,"edge")  
+        F3 = get_tally(idx_census-1, mcdc, data, SCORE_F3,"mesh")
+
+        # Filter if needed
+        if epsilon[WW_FILTER1] > 0:
+            F0 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F0)
+            F1 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F1)
+            F2 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F2)
+            F3 = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F3)
+
+        # initializing arrays
+        F = np.zeros((4,Nx)) 
+        P = np.zeros((4,Nx)) 
+        T = np.zeros((4,Nx)) 
+
+        for i in range(Nx):
+            F[0,i] = F0[i]
+            F[1,i] = F1[i]
+            F[2,i] = F2[i]
+            F[3,i] = F3[i]
+
+        # creating closure dict
+        closure={'F':F,
+                'P':P,
+                'T':T}
+        # saving closure data
+        save_weight_window_data("FBn",F[0,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("FTn",F[1,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("FBn-",F[2,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("FTn-",F[3,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+
+    elif space_scheme == HYBRID_FV:
+        # Load previous timestep tally data
+        # Flux and moments
+        phi = get_tally(idx_census-1, mcdc, data, SCORE_FLUX,"mesh")
+        phi_old = get_tally(idx_census-2, mcdc, data, SCORE_FLUX,"mesh")
+
+        F = get_tally(idx_census-1, mcdc, data, SCORE_SECOND_MOMENT,"mesh")
+        F_old = get_tally(idx_census-2, mcdc, data, SCORE_SECOND_MOMENT,"mesh")
+
+
+        closure = (phi/3 - F)
+        closure_old = (phi_old/3 - F_old)
+        # initializing arrays
+        Pl = 0
+        Pr = 0
+        F_new = np.zeros(Nx+2)
+        F_previous = np.zeros(Nx+2)
+        
+        F_new [1:-1] = closure
+        F_new[0] = F_new[1]
+        F_new[-1] = F_new[-2]
+        F_previous [1:-1] = closure_old
+        F_previous[0] = F_previous[1]
+        F_previous[-1] = F_previous[-2]
+        
+        # Filter if needed
+        if epsilon[WW_FILTER1] > 0:
+            F_new = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F_new)
+            F_previous = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F_previous)
+
+        # creating closure dict
+        closure={'F':F_new,
+                'previous_F':F_previous,
+                'Pl':Pl,
+                'Pr':Pr}
+        # saving closure data
+
+        save_weight_window_data("F",F_new,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("F_previous",F_previous,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        #save_weight_window_data("F",F)
+
+    return closure
+
 def plot_moments(name,moments):
     plt.clf()
     plt.plot(moments[0,:],label = "1")
@@ -3967,127 +4447,101 @@ def plot_moments(name,moments):
     plt.title(name)
     plt.legend()
     plt.show()
+
 def ww_hybrid(data, mcdc):
-    # accessing most recent tally dump
-    idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
-    mesh_x = mcdc["technique"]["ww"]["mesh"]["x"]
-    t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census-1]
-    t1 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
+    t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
+    t1 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census+1]
     Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
     Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
     Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
-    dt =  t1 - t0
+    dt = t1-t0
+    print(dt)
 
-    # Load previous timestep tally data
-    # Flux and moments
-    old_flux = get_tally(idx_census, mcdc, data, SCORE_FLUX)
-    old_flux_t = get_tally(idx_census, mcdc, data, SCORE_FLUX_MT)
-    old_flux_x = get_tally(idx_census, mcdc, data, SCORE_FLUX_MX)
-    old_flux_tx = get_tally(idx_census, mcdc, data, SCORE_FLUX_MTX)
-    
-    old_current = get_tally(idx_census, mcdc, data, SCORE_NET_CURRENT)
-    old_current_t = get_tally(idx_census, mcdc, data, SCORE_CURRENT_MT)
-    old_current_x = get_tally(idx_census, mcdc, data, SCORE_CURRENT_MX)
-    old_current_tx = get_tally(idx_census, mcdc, data, SCORE_CURRENT_MTX)
-    
-    old_sm = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT)
-    old_sm_t = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT_MT)
-    old_sm_x = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT_MX)
-    old_sm_tx = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT_MTX)
-
-    if epsilon[WW_FILTER1] > 0:
-        old_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux)
-        old_flux_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_x)
-        old_flux_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_t)
-        old_flux_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_flux_tx)
-        old_current = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current)
-        old_current_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_x)
-        old_current_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_t)
-        old_current_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_current_tx)
-        old_sm = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm)
-        old_sm_x = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm_x)
-        old_sm_t = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm_t)
-        old_sm_tx = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], old_sm_tx)
-
-    sm = losm_convert_moments(old_sm,old_sm_x,old_sm_t,old_sm_tx,mesh_x,t0,t1)
-    plot_moments("SM",sm)
-    flux = losm_convert_moments(old_flux,old_flux_x,old_flux_t,old_flux_tx,mesh_x,t0,t1)
-    plot_moments("flux",flux)
-    current = losm_convert_moments(old_current,old_current_x,old_current_t,old_current_tx,mesh_x,t0,t1)
-    plot_moments("current",current)
-
-    F = (flux/3)-sm
-    # Compute closures
-    P = np.zeros((4,Nx)) # get_tally(idx_census, mcdc, data, SCORE_P_PLUS)
-    T = np.zeros((4,Nx)) # get_tally(idx_census, mcdc, data, SCORE_T_PLUS)
-
-
-    # dict for problem
-    closure={'F':F,
-            'P':P,
-            'T':T}
-
-    old_state = np.zeros(Nx*8)
-    for i in range(Nx):
-        for i1 in range(4):
-            old_state[i*8+i1] = flux[i1,i]
-        for i2 in range(4):
-            old_state[i*8+4+i2] = current[i2,i]
+    x = mcdc["technique"]["ww"]["mesh"]["x"]
 
     problem = losm_create_problem(mcdc)
-    new_state = losm_step_time(problem,old_state,closure,dt=dt,save_a=False,sparse = True)    
-    new_flux, new_current = losm_average_state(new_state)
 
-    if True:
-        plt.clf()
-        plt.plot(old_flux,label="old_flux")
-        plt.plot(new_flux,label="new_flux")
-        plt.legend()
-        plt.show()
+    if problem["space_scheme"] == HYBRID_FE:
+        old_state = get_hybrid_ics(data,mcdc)
+        closure = get_hybrid_closure(data,mcdc)
 
-        plt.clf()
-        plt.plot(old_current,label="old_current")
-        plt.plot(new_current,label="new_current")
-        plt.legend()
-        plt.show()
+        # hybrid finite element (linear discontinous) solve
+        new_flux,new_current = losm_FE_step_time(problem,old_state,closure,dt=dt)    
 
-    ax_expand = []
-    if Nx == 1:
-        ax_expand.append(0)
-    if Ny == 1:
-        ax_expand.append(1)
-    if Nz == 1:
-        ax_expand.append(2)
-    for ax in ax_expand:
-        new_flux = np.expand_dims(new_flux, axis=ax)
+        # saving solution to low order problem
+        save_weight_window_data("soln_flux.0",new_flux[0,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_flux.1",new_flux[1,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_flux.2",new_flux[2,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_flux.3",new_flux[3,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_current.0",new_current[0,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_current.1",new_current[1,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_current.2",new_current[2,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_current.3",new_current[3,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+    
+        # averaging the four corner values to get mean for WW
+        mean_flux = np.zeros((Nx,1,1))
+        for i in range(Nx):
+            mean_flux[i,0,0] = np.mean(new_flux[:,i])
+        save_weight_window_data("soln_flux_mean",mean_flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+    
+    if problem["space_scheme"] == HYBRID_FV:
+        old_state = get_hybrid_ics(data,mcdc)
+        closure = get_hybrid_closure(data,mcdc)
+        '''# ONLY USE FOR DEBUGGING (PURE DETERMINISTIC SOLVE)
+        if idx_census == 0:#running deterministic problem for diagnotics:
+            soln_flux = np.zeros((20,Nx+2))
+            soln_current = np.zeros((20,Nx+1))
+
+
+            for n in range(20):
+                if n == 1:
+                    problem["previous_source"] =problem["source"]
+                if n > 0:
+                    problem["source"] = np.zeros_like(problem["source"])
+                if n > 1:
+                    problem["previous_source"] = np.zeros_like(problem["source"])
+                #plt.clf()
+                #plt.plot(problem["sigf"])
+                #plt.show()
+                flux,current = losm_FV_step_time(problem,old_state,closure,dt=1)   
+                soln_flux[n,:] = flux 
+                plt.clf()
+                plt.plot(flux)
+                plt.show()
+                soln_current[n,:] = current
+                old_state = flux,current
+
+            plt.clf()
+            for n in range(20):
+                plt.plot(flux[n])
+
+            plt.show()
+        
+        '''
+        # hybrid finiten volume solve
+        flux,current = losm_FV_step_time(problem,old_state,closure,dt=dt)    
+
+        # saving solution to low order problem
+        save_weight_window_data("soln_flux_mean",flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_current_mean",current,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        mean_flux = np.zeros((Nx,1,1))
+        mean_flux[:,0,0]= flux[1:-1]
+    center = np.zeros((Nx,1,1))
+    # Filtering solution
     if epsilon[WW_FILTER1] > 0:
-        new_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], new_flux)
-    center = new_flux
-    save_weight_window_data("ic_flux",old_flux)
-    save_weight_window_data("ic_current",old_current)
-    save_weight_window_data("new_flux",new_flux)
-    save_weight_window_data("new_current",new_current)
-    save_weight_window_data("F1",F[0,:])
-    save_weight_window_data("F2",F[1,:])
-    save_weight_window_data("F3",F[2,:])
-    save_weight_window_data("F4",F[3,:])
-    save_weight_window_data("flux1",flux[0,:])
-    save_weight_window_data("flux2",flux[1,:])
-    save_weight_window_data("flux3",flux[2,:])
-    save_weight_window_data("flux4",flux[3,:])
-    save_weight_window_data("current1",current[0,:])
-    save_weight_window_data("current2",current[1,:])
-    save_weight_window_data("current3",current[2,:])
-    save_weight_window_data("current4",current[3,:])
+        mean_flux = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], mean_flux)
+    center = mean_flux
+
+
     return center
 
 @njit
 def filter_data(w, k, data):
-    if w == 1:
+    if w == FILTER_UNIFORM:
         return sp.ndimage.uniform_filter(data, k, mode="nearest")
-    elif w == 2:
+    elif w == FILTER_FOURIER:
         freq_data = np.fft.fftn(data)
         freq_grid = np.fft.fftfreq(data.shape[0])
         if data.ndim > 1:

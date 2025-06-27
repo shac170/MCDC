@@ -114,10 +114,20 @@ def loop_fixed_source(data_arr, mcdc_arr):
             ):
                 # No more particle to work on
                 break
+            if (mcdc["technique"]["weight_window"] and idx_census < mcdc["setting"]["N_census"] - 1):
+                kernel.update_weight_windows(data, mcdc)
             # Loop over source particles
             seed_source = kernel.split_seed(seed_census, SEED_SPLIT_SOURCE)
             loop_source(seed_source, data, mcdc)
 
+            # Score census tallies 
+            for b_idx in range(kernel.get_bank_size(mcdc["bank_census"])):
+                # Get particle from active bank
+                P_rec = mcdc["bank_census"]["particles"][b_idx]
+                P_arr = [P_rec]
+                for tally in mcdc["census_tallies"]:
+                    kernel.score_census_tally(P_arr,tally,data,mcdc)
+            kernel.tally_accumulate(data,mcdc)
             # Loop over source precursors
             if kernel.get_bank_size(mcdc["bank_precursor"]) > 0:
                 seed_source_precursor = kernel.split_seed(
@@ -128,9 +138,7 @@ def loop_fixed_source(data_arr, mcdc_arr):
             # Manage particle banks: population control and work rebalance
             seed_bank = kernel.split_seed(seed_census, SEED_SPLIT_BANK)
             kernel.manage_particle_banks(seed_bank, mcdc)
-            if (mcdc["technique"]["weight_window"]
-                and idx_census < mcdc["setting"]["N_census"] - 2):
-                    kernel.update_weight_windows(data, mcdc)
+
             # Time census-based tally closeout
             if mcdc["setting"]["census_based_tally"]:          
                 if mcdc["mpi_master"]:

@@ -51,6 +51,18 @@ from mcdc.constant import (
     WW_FILTER1,
     WW_FILTER2,
     WW_HYBRID,
+    WW_HYBRID_IC,
+    WW_SPACE_DISC,
+    WW_TIME_DISC,
+    HYBRID_FE,
+    HYBRID_BE,
+    HYBRID_CN,
+    HYBRID_FV,
+    HYBRID_IC_HYBRID,
+    HYBRID_IC_MC_CENSUS,
+    HYBRID_IC_MC_MESH,
+    FILTER_FOURIER,
+    FILTER_UNIFORM,
 )
 from mcdc.print_ import print_error
 import mcdc.type_ as type_
@@ -1464,7 +1476,10 @@ def weight_window(
             ["min-center", 
              "wollaber", 
              "n-snapshot", 
-             "filter",]
+             "filter",
+             "hybrid-ic",
+             "space-discretization",
+             "time-discretization"]
         )
         if mod_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = mod[1]
@@ -1475,10 +1490,39 @@ def weight_window(
             card["ww"]["epsilon"][WW_N_SNAP] = mod[1]
         if mod_checked == "filter":
             if mod[1] == "fourier":
-                card["ww"]["epsilon"][WW_FILTER1] = 2
+                card["ww"]["epsilon"][WW_FILTER1] = FILTER_FOURIER
+                card["ww"]["epsilon"][WW_FILTER2] = mod[2]
+            elif mod[1] == "uniform":
+                card["ww"]["epsilon"][WW_FILTER1] = FILTER_UNIFORM
+                card["ww"]["epsilon"][WW_FILTER2] = mod[2]
             else:
-                card["ww"]["epsilon"][WW_FILTER1] = 1
-            card["ww"]["epsilon"][WW_FILTER2] = mod[2]
+                print("Invalid filter! please choose 'fourier' or 'uniform' (moving-average)")
+            
+        if mod_checked == "hybrid-ic":
+            if mod[1] == "hybrid":
+                card["ww"]["epsilon"][WW_HYBRID_IC] = HYBRID_IC_HYBRID
+            elif mod[1] == "mc-mesh":
+                card["ww"]["epsilon"][WW_HYBRID_IC] = HYBRID_IC_MC_MESH
+            elif mod[1] == "mc-census":
+                card["ww"]["epsilon"][WW_HYBRID_IC] = HYBRID_IC_MC_CENSUS
+            else:
+                print("Invalid hybrid initial condition! please choose 'hybrid' (only closure from MC) or 'mc-mesh' (track-length tallies) or 'mc-census' (census tallies)")
+
+        if mod_checked == "space-discretization":
+            if mod[1] == "FV":
+                card["ww"]["epsilon"][WW_SPACE_DISC] = HYBRID_FV
+            elif mod[1] == "FE":
+                card["ww"]["epsilon"][WW_SPACE_DISC] = HYBRID_FE
+            else:
+                print("Invalid space-discretization! please choose 'FV' (finite volume) or 'FE' (finite element/linear-discontinous)")
+
+        if mod_checked == "time-discretization":
+            if mod[1] == "BE":
+                card["ww"]["epsilon"][WW_TIME_DISC] = HYBRID_BE
+            elif mod[1] == "CN":
+                card["ww"]["epsilon"][WW_TIME_DISC] = HYBRID_CN
+            else:
+                print("Invalid time-discretization! please choose 'BE' (backward Euler) or 'CN' (Crank-Nicolson)")
 
     # Set mesh
     card["ww"]["mesh"]["x"] = x

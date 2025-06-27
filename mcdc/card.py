@@ -396,6 +396,26 @@ class MeshTallyCard(TallyCard):
         self.y = np.array([-INF, INF])
         self.z = np.array([-INF, INF])
         self.N_bin = 1
+        
+class CensusTallyCard(TallyCard):
+    def __init__(self):
+        TallyCard.__init__(self, "Census tally")
+
+        # Set card data
+        self.x = np.array([-INF, INF])
+        self.y = np.array([-INF, INF])
+        self.z = np.array([-INF, INF])
+        self.N_bin = 1
+
+class EdgeTallyCard(TallyCard):
+    def __init__(self):
+        TallyCard.__init__(self, "Edge tally")
+
+        # Set card data
+        self.x = np.array([-INF, INF])
+        self.y = np.array([-INF, INF])
+        self.z = np.array([-INF, INF])
+        self.N_bin = 1
 
 
 class SurfaceTallyCard(TallyCard):
