@@ -27,6 +27,8 @@ from mcdc.constant import (
     SCORE_CAPTURE,
     SCORE_FISSION,
     SCORE_NET_CURRENT,
+    SCORE_TRACKS,
+    SCORE_SECOND_MOMENT,
 )
 from mcdc.transport.geometry.surface import get_normal_component
 from mcdc.transport.tally.filter import get_filter_indices
@@ -51,6 +53,8 @@ def make_scores(particle_container, flux, tally, idx_base, mcdc, data):
             score = flux
         elif score_type == SCORE_DENSITY:
             score = flux / speed
+        elif score_type == SCORE_TRACKS:
+            score = flux / flux
         elif score_type == SCORE_COLLISION:
             score = flux * physics.macro_xs(
                 REACTION_TOTAL, particle_container, mcdc, data
@@ -67,6 +71,10 @@ def make_scores(particle_container, flux, tally, idx_base, mcdc, data):
             surface = mcdc["surfaces"][particle["surface_ID"]]
             mu = get_normal_component(particle_container, speed, surface, data)
             score = flux * mu
+        elif score_type == SCORE_SECOND_MOMENT:
+            surface = mcdc["surfaces"][particle["surface_ID"]]
+            mu = get_normal_component(particle_container, speed, surface, data)
+            score = flux * mu *mu
         adapt.global_add(data, idx_base + i_score, score * multiplier)
 
 

@@ -30,6 +30,8 @@ from mcdc.constant import (
     SCORE_CAPTURE,
     SCORE_FISSION,
     SCORE_NET_CURRENT,
+    SCORE_TRACKS,
+    SCORE_SECOND_MOMENT,
     TALLY_GLOBAL,
     TALLY_CELL,
     TALLY_MESH,
@@ -106,6 +108,10 @@ class TallyBase(ObjectPolymorphic):
                 self.scores.append(SCORE_FISSION)
             elif score == "net-current":
                 self.scores.append(SCORE_NET_CURRENT)
+            elif score == "tracks":
+                self.scores.append(SCORE_TRACKS)
+            elif score == "second-moment":
+                self.scores.append(SCORE_SECOND_MOMENT)
             else:
                 print_error(f"Unknown tally score: {score}")
 
@@ -238,6 +244,11 @@ def decode_score_type(type_, lower_case=False):
         return "Fission" if not lower_case else "fission"
     elif type_ == SCORE_NET_CURRENT:
         return "Net current" if not lower_case else "net-current"
+    elif type_ == SCORE_TRACKS:
+        return "Tracks" if not lower_case else "tracks"
+    elif type_ == SCORE_SECOND_MOMENT:
+        return "Second moment" if not lower_case else "second-moment"
+
 
 
 # ======================================================================================
