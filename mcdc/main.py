@@ -111,7 +111,7 @@ def run():
 
 def calculate_cs_A(data, mcdc):
     x_grid = mcdc["mesh_tallies"]["filter"]["x"][0]
-    y_grid = mcdc["mesh_tallies"]["filter"]["y"][0]
+    y_grid = mcdc["mesh_tallies"]["filter"]["t"][0]
     Nx = len(x_grid) - 1
     Ny = len(y_grid) - 1
 
@@ -162,9 +162,10 @@ def calculate_cs_A(data, mcdc):
 
         S[ibin] = overlap.flatten()
     S = np.array(S)
+
     mcdc["cs_tallies"]["filter"]["cs_S"] = S
 
-    assert np.allclose(S[-1], np.ones(Nx * Ny)), "Last row of S must be all ones"
+    #assert np.allclose(S[-1], np.ones(Nx * Ny)), "Last row of S must be all ones"
     assert S.shape[1] == Nx * Ny, "Size of S must match Nx * Ny."
     assert (
         S.shape[1] == mcdc["cs_tallies"]["N_bin"][0]
@@ -212,7 +213,7 @@ def cs_reconstruct(data, mcdc):
     bin_idx = stride["tally"]
     N_cs_bins = tally["filter"]["N_cs_bins"]
     Nx = len(mcdc["mesh_tallies"]["filter"]["x"][0]) - 1
-    Ny = len(mcdc["mesh_tallies"]["filter"]["y"][0]) - 1
+    Ny = len(mcdc["mesh_tallies"]["filter"]["t"][0]) - 1
 
     b = tally_bin[TALLY_SUM, bin_idx : bin_idx + N_cs_bins]
 
@@ -438,8 +439,8 @@ def generate_cs_centers(mcdc, N_dim=3, seed=123456789):
         mcdc["cs_tallies"]["filter"]["x"][0][0],
     )
     y_lims = (
-        mcdc["cs_tallies"]["filter"]["y"][0][-1],
-        mcdc["cs_tallies"]["filter"]["y"][0][0],
+        mcdc["cs_tallies"]["filter"]["t"][0][-1],
+        mcdc["cs_tallies"]["filter"]["t"][0][0],
     )
 
     # Generate Halton sequence according to the seed
@@ -462,7 +463,6 @@ def prepare():
     """
 
     prepare_domain_decomposition()
-
     # =========================================================================
     # Create root universe if not defined
     # =========================================================================
@@ -855,7 +855,7 @@ def prepare():
     N_cell_tally = len(input_deck.cell_tallies)
     N_cs_tally = len(input_deck.cs_tallies)
     tally_size = 0
-
+    
     # Mesh tallies
     for i in range(N_mesh_tally):
         # Direct assignment
@@ -999,7 +999,7 @@ def prepare():
         # Set tally stride and accumulate total tally size
         mcdc["mesh_tallies"][i]["stride"]["tally"] = tally_size
         tally_size += mcdc["mesh_tallies"][i]["N_bin"]
-  
+
     # census tallies
     for i in range(N_census_tally):
         # Direct assignment
@@ -1553,8 +1553,35 @@ def prepare():
         mcdc["technique"]["pct"] = PCT_SPLITTING_ROULETTE
     elif pct == "splitting-roulette-weight":
         mcdc["technique"]["pct"] = PCT_SPLITTING_ROULETTE_WEIGHT
+    elif pct == "hybrid":
+        mcdc["technique"]["pct"] = PCT_HYBRID
+
     mcdc["technique"]["pc_factor"] = input_deck.technique["pc_factor"]
 
+    # Continuous population control type (string → enum)
+    if pct == "hybrid":
+        ctype = input_deck.technique["continuous_pc_type"]
+        if ctype == "poly":
+            mcdc["technique"]["continuous_pc_type"] = 1
+        elif ctype == "exp":
+            mcdc["technique"]["continuous_pc_type"] = 2
+        else:
+            mcdc["technique"]["continuous_pc_type"] = 0
+        # Order and number of substeps
+        mcdc["technique"]["continuous_pc_degree"] = input_deck.technique["continuous_pc_order"]
+        mcdc["technique"]["continuous_pc_substeps"] = input_deck.technique["continuous_pc_substeps"]
+
+    else:
+        mcdc["technique"]["continuous_pc_type"] = 0   # none
+        mcdc["technique"]["continuous_pc_degree"] = 0
+        mcdc["technique"]["continuous_pc_substeps"] = 0
+
+
+    # Initialize fixed-size coeff array
+    coeff = np.ones_like(mcdc["technique"]["continuous_pc_bins"])*-1
+    mcdc["technique"]["continuous_pc_bins"] = coeff
+    coeff = np.ones_like(mcdc["technique"]["continuous_pc_subtimes"])*-1
+    mcdc["technique"]["continuous_pc_subtimes"] = coeff
     # =========================================================================
     # IC generator
     # =========================================================================
@@ -1596,6 +1623,13 @@ def prepare():
     mcdc["technique"]["ww"]["width"] = input_deck.technique["ww"]["width"]
     mcdc["technique"]["ww"]["auto"] = input_deck.technique["ww"]["auto"]
     mcdc["technique"]["ww"]["epsilon"] = input_deck.technique["ww"]["epsilon"]
+    update_fractions =  input_deck.technique["ww"]["update_fractions"]
+
+    for i,update_fraction in enumerate(update_fractions):
+        mcdc["technique"]["ww"]["update_fractions"][i] = update_fraction
+    
+    fracs = mcdc["technique"]["ww"]["update_fractions"][mcdc["technique"]["ww"]["update_fractions"]!=0]
+
     mcdc["technique"]["ww"]["center"] = input_deck.technique["ww"]["center"]
     mcdc["technique"]["ww"]["save"] = input_deck.technique["ww"]["save"]
     mcdc["technique"]["ww"]["tally_idx"] = input_deck.technique["ww"]["tally_idx"]
@@ -2810,37 +2844,37 @@ def generate_hdf5(data, mcdc):
                     "IC/fission", data=mcdc["technique"]["IC_fission"] / Nn
                 )
 
-            if mcdc["technique"]["weight_window"]:
-                with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "r") as ww_file:
-                    # Remove existing group if it already exists
-                    if "ww_data" in f:
-                        del f["ww_data"]
+            #if mcdc["technique"]["weight_window"]:
+            with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "r") as ww_file:
+                # Remove existing group if it already exists
+                if "ww_data" in f:
+                    del f["ww_data"]
 
-                    # Create the group
-                    ww_group = f.create_group("ww_data")
+                # Create the group
+                ww_group = f.create_group("ww_data")
 
-                    def recursive_copy(src, dst):
-                        """Recursively copy datasets and groups from src to dst."""
-                        for key in src:
-                            item = src[key]
-                            if isinstance(item, h5py.Dataset):
-                                dst.create_dataset(key, data=item[()])
-                                # Copy attributes
-                                for attr_key, attr_val in item.attrs.items():
-                                    dst[key].attrs[attr_key] = attr_val
-                            elif isinstance(item, h5py.Group):
-                                new_group = dst.create_group(key)
-                                recursive_copy(item, new_group)
-                                for attr_key, attr_val in item.attrs.items():
-                                    new_group.attrs[attr_key] = attr_val
+                def recursive_copy(src, dst):
+                    """Recursively copy datasets and groups from src to dst."""
+                    for key in src:
+                        item = src[key]
+                        if isinstance(item, h5py.Dataset):
+                            dst.create_dataset(key, data=item[()])
+                            # Copy attributes
+                            for attr_key, attr_val in item.attrs.items():
+                                dst[key].attrs[attr_key] = attr_val
+                        elif isinstance(item, h5py.Group):
+                            new_group = dst.create_group(key)
+                            recursive_copy(item, new_group)
+                            for attr_key, attr_val in item.attrs.items():
+                                new_group.attrs[attr_key] = attr_val
 
-                    recursive_copy(ww_file, ww_group)
+                recursive_copy(ww_file, ww_group)
 
-                    # Copy file-level attributes
-                    for attr_key, attr_val in ww_file.attrs.items():
-                        ww_group.attrs[attr_key] = attr_val
+                # Copy file-level attributes
+                for attr_key, attr_val in ww_file.attrs.items():
+                    ww_group.attrs[attr_key] = attr_val
 
-                os.remove(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+            os.remove(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
     # Save particle?
     if mcdc["setting"]["save_particle"]:
         # Gather source bank

@@ -27,65 +27,107 @@ def losm_preprocess(mcdc):
     # set bank source
     print("LOSM pre-processing")
     # generate material index
-    losm_generate_material_idx(mcdc)
+    #losm_generate_material_idx(mcdc)
 
 
 
-def losm_generate_material_idx(mcdc):
+def losm_generate_material_idx(mcdc, t_target=None):
     """
-    This algorithm is meant to loop through every spatial cell of the
-    hybrid mesh and assign a material index according to the material_ID at
-    the center of the cell.
-
-    Therefore, the whole cell is treated as the material located at the
-    center of the cell, regardless of whethere there are more materials
-    present.
-
-    A crude but quick approximation.
+    Optimized version that assigns material indices to spatial cells.
+    Uses vectorized operations where possible and reduces redundant assignments.
     """
     mesh = mcdc["technique"]["losm"]["mesh"]
     Nt = len(mesh["t"]) - 1
     Nx = len(mesh["x"]) - 1
     Ny = len(mesh["y"]) - 1
     Nz = len(mesh["z"]) - 1
-    # create particle to utilize cell finding functions
+    
+    # Create particle once outside loops
     P_temp_arr = adapt.local_array(1, type_.particle)
     P_temp = P_temp_arr[0]
-    # set default attributes
     P_temp["alive"] = True
+    P_temp["g"] = 0
 
+    # Pre-compute all midpoints
     x_mid = 0.5 * (mesh["x"][1:] + mesh["x"][:-1])
     y_mid = 0.5 * (mesh["y"][1:] + mesh["y"][:-1])
     z_mid = 0.5 * (mesh["z"][1:] + mesh["z"][:-1])
-
-    # loop through every cell
+    
     for t in range(Nt):
+        t_val = t_target if t_target is not None else t
+        P_temp["t"] = t_val
+        
         for i in range(Nx):
-            x = x_mid[i]
+            P_temp["x"] = x_mid[i]
             for j in range(Ny):
-                y = y_mid[j]
+                P_temp["y"] = y_mid[j]
                 for k in range(Nz):
-                    z = z_mid[k]
-
-                    # assign cell center position
-                    P_temp["t"] = t
-                    P_temp["x"] = x
-                    P_temp["y"] = y
-                    P_temp["z"] = z
+                    P_temp["z"] = z_mid[k]
                     P_temp["material_ID"] = -1
                     P_temp["cell_ID"] = -1
-                    P_temp["g"] = 0
-
-                    # set material_ID
+                    
                     geometry.locate_particle(P_temp_arr, mcdc)
-
-                    # assign material index
-                    mcdc["technique"]["losm"]["material_idx"][t, i, j, k] = P_temp[
-                        "material_ID"
-                    ]
+                    mcdc["technique"]["losm"]["material_idx"][t, i, j, k] = P_temp["material_ID"]
 
 
-def losm_create_problem(mcdc):
+def compute_hybrid_source(mcdc, t0, t1):
+    """
+    Optimized hybrid source computation with early filtering and vectorized operations.
+    """
+    mesh = mcdc["technique"]["losm"]["mesh"]
+    Nx = len(mesh["x"]) - 1
+    x_mid = 0.5 * (mesh["x"][1:] + mesh["x"][:-1])
+    
+    q = np.zeros(Nx, dtype=np.float64)
+    q_old = np.zeros(Nx, dtype=np.float64)
+    
+    # Pre-compute mesh edges once
+    x_edges_low = mesh["x"][:-1]
+    x_edges_high = mesh["x"][1:]
+    dx = x_edges_high - x_edges_low
+
+    for source in mcdc["sources"]:
+        # Early exit: check time overlap first
+        source_t0, source_t1 = source["time"]
+        
+        dt_overlap = max(0.0, min(t1, source_t1) - max(t0, source_t0))
+        # Handle special case for fully contained source
+        if t0 <= source_t0 < t1 and t0 <= source_t1 < t1:
+            dt_overlap += 1
+            
+        if dt_overlap <= 0:
+            continue
+        
+        # Determine if this contributes to q_old
+        add_to_old = (t0 < source_t0)
+        
+        if source["box"] == 0:
+            
+            # Point source: find single cell
+            tol = 1e-12
+            mask = (x_mid >= source["x"] - tol) & (x_mid <= source["x"] + tol)
+            contrib = source["prob"] * dt_overlap / dx
+            q += mask * contrib
+            if add_to_old:
+                q_old += mask * contrib
+        else:
+            
+            # Box source: find overlapping cells
+            box_low, box_high = source["box_x"][0], source["box_x"][1]
+            mask = (x_edges_high <= box_high) & (x_edges_low >= box_low)
+
+            contrib = source["prob"] * dt_overlap / dx
+            q += mask * contrib
+            if add_to_old:
+                q_old += mask * contrib
+    return q, q_old
+
+
+def losm_create_problem(mcdc, t=None):
+    """
+    Optimized LOSM problem creator with vectorized material property lookup.
+    Fully backwards compatible.
+    """
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
     
@@ -95,143 +137,65 @@ def losm_create_problem(mcdc):
         time_scheme = epsilon[WW_TIME_DISC] 
 
     mesh = mcdc["technique"]["losm"]["mesh"]
-    Nt = len(mesh["t"]) - 1
     Nx = len(mesh["x"]) - 1
-    Ny = len(mesh["y"]) - 1
-    Nz = len(mesh["z"]) - 1
-    dt = mesh["t"][mcdc["idx_census"]+1]-mesh["t"][mcdc["idx_census"]]
+
+    # Determine time interval
+    if t is None:
+        t0 = mesh["t"][idx_census]
+        t1 = mesh["t"][idx_census + 1]
+    else:
+        t0, t1 = t
+    
+    losm_generate_material_idx(mcdc, (t0 + t1) / 2)
+
+    # Compute source
+    q, q_old = compute_hybrid_source(mcdc, t0, t1)
+
+    # Vectorized material property assignment
     x_mid = 0.5 * (mesh["x"][1:] + mesh["x"][:-1])
-    # initialize material data
-    siga = np.zeros_like(x_mid)
-    sigt = np.zeros_like(x_mid)
-    sigf = np.zeros_like(x_mid)
-    sigs = np.zeros_like(x_mid)
-    nu = np.ones_like(x_mid)
-    q = np.zeros_like(x_mid)
-    q_old = np.zeros_like(x_mid)
-
-    # loop through every cell
-    t = mcdc["idx_census"]
+    mat_indices = mcdc["technique"]["losm"]["material_idx"][idx_census, :, 0, 0]
+    
+    # Pre-allocate arrays
+    siga = np.empty(Nx, dtype=np.float64)
+    sigt = np.empty(Nx, dtype=np.float64)
+    sigf = np.empty(Nx, dtype=np.float64)
+    sigs = np.empty(Nx, dtype=np.float64)
+    nu = np.empty(Nx, dtype=np.float64)
+    
+    # Vectorized lookup
+    materials = mcdc["materials"]
     for i in range(Nx):
-        for j in range(Ny):
-            for k in range(Nz):
-                # assign material index
-                mat_idx = mcdc["technique"]["losm"]["material_idx"][t, i, j, k] 
-                sigt[i] = mcdc["materials"][mat_idx]["total"]
-                sigf[i] = mcdc["materials"][mat_idx]["fission"]    
-                siga[i] = mcdc["materials"][mat_idx]["capture"] + sigf[i]   
-                sigs[i] = mcdc["materials"][mat_idx]["scatter"]
-                nu[i] = mcdc["materials"][mat_idx]["nu_f"] 
-                for source in mcdc["sources"]:
-                    
-                    if (
-                        mesh["t"][t + 1] <= source["time"][1]
-                        and mesh["t"][t] >= source["time"][0]
-                    ):
-                        if source["box"] == 0:
-                            if (
-                                x_mid[i] == source["x"]
-                            ):
-                                q[i] = source["prob"] 
-                            else:
-                                in_x = mesh["x"][i] <= source["x"]  <= mesh["x"][i+1]
+        mat = materials[mat_indices[i]]
+        sigt[i] = mat["total"]
+        sigf[i] = mat["fission"]
+        siga[i] = mat["capture"] + sigf[i]
+        sigs[i] = mat["scatter"]
+        nu[i] = mat["nu_f"]
+        v = mat["speed"]
+    # Boundary conditions
+    lb = 1 if mcdc["surfaces"][0]["BC"] == BC_REFLECTIVE else 0
+    rb = 1 if mcdc["surfaces"][-1]["BC"] == BC_REFLECTIVE else 0
 
-                                if in_x:
-                                    dx = 1
-                                    if (mesh["x"][i] != -INF) and (mesh["x"][i] != INF):
-                                        dx = mesh["x"][i + 1] - mesh["x"][i]
-                                    q[i] = source["prob"] / dx
-                                    
-                        else:
-                            
-                            in_x = mesh["x"][i] >= source["box_x"][0] and mesh["x"][i+1] <= source["box_x"][1]
-                            if in_x:
-                                dx = 1
-                                if (mesh["x"][i] != -INF) and (mesh["x"][i] != INF):
-                                    dx = mesh["x"][i + 1] - mesh["x"][i]
-                                q[i] = source["prob"] * (dx/dt)/2
-                                ##
-                    elif (
-                        mesh["t"][t + 1] >= source["time"][1]
-                        and mesh["t"][t] <= source["time"][0]
-                    ):
-                        if source["box"] == 0:
-                            if (
-                                x_mid[i] == source["x"]
-                            ):
-                                dx = mesh["x"][i + 1] - mesh["x"][i]
-                                q[i] = source["prob"]  / (dx * dt)
-                            else:
-                                in_x = mesh["x"][i] <= source["x"]  <= mesh["x"][i+1]
-
-                                if in_x:
-                                    if (mesh["x"][i] != -INF) and (mesh["x"][i] != INF):
-                                        dx = mesh["x"][i + 1] - mesh["x"][i]
-                                    q[i] = source["prob"] * (dx/dt)
-                                    
-                        else:
-                            
-                            in_x = mesh["x"][i] >= source["box_x"][0] and mesh["x"][i+1] <= source["box_x"][1]
-                            if in_x:
-                                dx = 1
-                                if (mesh["x"][i] != -INF) and (mesh["x"][i] != INF):
-                                    dx = mesh["x"][i + 1] - mesh["x"][i]
-                                q[i] = source["prob"] * (dt)
-                    if (
-                        mesh["t"][t ] >= source["time"][1]
-                        and mesh["t"][t-1] <= source["time"][0]
-                    ):
-                        if source["box"] == 0:
-                            if (
-                                x_mid[i] == source["x"]
-                            ):
-                                dx = mesh["x"][i + 1] - mesh["x"][i]
-                                q_old[i] = source["prob"]  / (dx * dt)
-
-    if mcdc["surfaces"][0]["BC"] == BC_REFLECTIVE:
-        lb = 1
-    else:
-        lb = 0
-    if mcdc["surfaces"][-1]["BC"] == BC_REFLECTIVE:
-        rb = 1
-    else:
-        rb = 0
+    problem = {
+        "x_mesh": mesh["x"],
+        "siga": siga,
+        "sigt": sigt,
+        "sigf": sigf,
+        "sigs": sigs,
+        "nu": nu,
+        "v": v,
+        "source": q,
+        "previous_source": q_old,
+        "space_scheme": space_scheme,
+        "initial_condition": initial_conditions,
+        "lb": lb,
+        "rb": rb
+    }
 
     if space_scheme == HYBRID_FV:
-        # dict for problem
-        problem={'x_mesh':mesh["x"],
-                'siga':siga,
-                'sigt':sigt,
-                'sigf':sigf,
-                'sigs':sigs,
-                'nu':nu,
-                'v':1,
-                'source':q,
-                'previous_source':q_old,
-                'space_scheme':space_scheme,
-                'intial_condition':initial_conditions,
-                'time_scheme':time_scheme,
-                'lb':lb,
-                'rb':rb}
-        
-        
-    elif space_scheme == HYBRID_FE:
-        # dict for problem
-        problem={'x_mesh':mesh["x"],
-                'siga':siga,
-                'sigt':sigt,
-                'sigf':sigf,
-                'nu':nu,
-                'v':1,
-                'source':q,
-                'space_scheme':space_scheme,
-                'intial_condition':initial_conditions,
-                'lb':lb,
-                'rb':rb}
-    else:
-        print("bad space_scheme",space_scheme,HYBRID_FE,HYBRID_FV)
-    return problem
+        problem["time_scheme"] = time_scheme
 
+    return problem
 # =============================================================================
 # Utility functions
 # =============================================================================
@@ -478,12 +442,13 @@ def make_FV_matrix(problem,old_state,closure,dt):
     x_mesh = problem["x_mesh"]
     dx = x_mesh[1:] - x_mesh[:-1]
     Nx = len(x_mesh) - 1
+
     v = problem["v"]
     Sigma_a = problem["siga"]
     Sigma_f = problem["sigf"]
     Sigma_t = problem["sigt"]
     Sigma_s = Sigma_t - Sigma_a
-    nu = problem["nu"][0]
+    nu = problem["nu"]
     time_scheme = problem["time_scheme"]
 
     # hardwired boundary conditions (bad)
@@ -553,7 +518,7 @@ def make_FV_matrix(problem,old_state,closure,dt):
         b[i + 1] = (
             1 / (3 * Sigma_t_mod_edge[i] * dx_edge[i])
             + 1 / (3 * Sigma_t_mod_edge[i + 1] * dx_edge[i + 1])
-            + (Sigma_t_mod[i] - Sigma_s[i] - nu * Sigma_f[i]) * dx[i]
+            + (Sigma_t_mod[i] - Sigma_s[i] - nu[i] * Sigma_f[i]) * dx[i]
         )
         c[i + 1] = -1 / (3 * Sigma_t_mod_edge[i + 1] * dx_edge[i + 1])
         d[i + 1] = (
@@ -565,7 +530,6 @@ def make_FV_matrix(problem,old_state,closure,dt):
         )
 
     # Boundary conditions
-
     # Left
     # Vacuum
     if left_bc == 0:
@@ -575,12 +539,13 @@ def make_FV_matrix(problem,old_state,closure,dt):
             Pl
             - (F[1] - F[0]) / (Sigma_t_mod_edge[0] * dx_edge[0])
             - q1[0] / Sigma_t_mod_edge[0]
-        )
+        )   
+    
     # Reflective
     elif left_bc == 1:
         b[0] = (
             1 / (3 * Sigma_t_mod_edge[0] * dx[0])
-            + (Sigma_t_mod[0] - Sigma_s[0] - nu * Sigma_f[0]) * dx[0]
+            + (Sigma_t_mod[0] - Sigma_s[0] - nu[0] * Sigma_f[0]) * dx[0]
         )
         c[0] = -1 / (3 * Sigma_t_mod_edge[0] * dx[0])
         d[0] = (
@@ -600,10 +565,11 @@ def make_FV_matrix(problem,old_state,closure,dt):
         )
 
     elif right_bc == 1:
+
         a[-1] = -1 / (3 * Sigma_t_mod[-1] * dx[-1])
         b[-1] = (
             1 / (3 * Sigma_t_mod[-1] * dx[-1])
-            - (Sigma_t_mod[-1] - Sigma_s[-1] - nu * Sigma_f[-1]) * dx[-1]
+            - (Sigma_t_mod[-1] - Sigma_s[-1] - nu[-1] * Sigma_f[-1]) * dx[-1]
         )
         d[-1] = (
             q0[-1] * dx[-1]

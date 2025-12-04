@@ -45,7 +45,7 @@ mcdc.source(z=[5.0, 6.0], isotropic=True, prob=0.5)
 mcdc.tally.mesh_tally(scores=["flux"], z=np.linspace(0.0, 8.0, 81))
 
 # Setting
-mcdc.setting(N_particle=5000)
-mcdc.domain_decomposition(z=np.linspace(0.0, 8.0, 5))
+mcdc.setting(N_particle=100000)
+#mcdc.domain_decomposition(z=np.linspace(0.0, 8.0, 5))
 # Run
 mcdc.run()

@@ -1,5 +1,6 @@
 import h5py, math, numba
 import scipy as sp
+from scipy.optimize import curve_fit
 from mpi4py import MPI
 from numba import (
     int64,
@@ -16,10 +17,10 @@ import mcdc.src.mesh as mesh_
 import mcdc.src.physics as physics
 import mcdc.src.surface as surface_
 import mcdc.type_ as type_
-
+import numpy as np
 from mcdc.adapt import toggle, for_cpu, for_gpu
 from mcdc.constant import *
-from mcdc.print_ import print_error, print_msg
+from mcdc.print_ import print_error, print_msg, print_progress
 from mcdc.src.algorithm import binary_search, binary_search_with_length
 
 from mcdc.losm.losm_kernel import losm_create_problem, losm_FV_step_time,  losm_FE_step_time,  losm_convert_moments,reconstruct_from_state
@@ -1085,7 +1086,7 @@ def manage_particle_banks(seed, mcdc):
         normalize_weight(mcdc["bank_census"], mcdc["setting"]["N_particle"])
 
     # Population control
-    if mcdc["technique"]["population_control"]:
+    if mcdc["technique"]["population_control"] and mcdc["technique"]["pct"] != PCT_HYBRID:
         population_control(seed, mcdc)
     else:
         # Swap census and source bank
@@ -1544,7 +1545,225 @@ def population_control(seed, mcdc):
     elif mcdc["technique"]["pct"] == PCT_SPLITTING_ROULETTE_WEIGHT:
         pct_splitting_roulette_weight(seed, mcdc)
 
+def apply_continuous_pc(P_arr, prog):
+    """
+    Apply continuous population control to a particle P_arr
+    using the fitted continuous C(t) weight-target function
+    stored in mcdc["technique"]["continuous_pc"]["function"].
 
+    Mirrors the logic of the discrete weight_window() routine.
+    """
+    P = P_arr[0]
+
+    mcdc = adapt.mcdc_global(prog)
+
+    # Particle time
+    t = P["t"]  
+    # Fit continuous population
+    fit_type  = mcdc["technique"]["continuous_pc_type"]
+    order     = mcdc["technique"]["continuous_pc_degree"]
+    n_sub     = mcdc["technique"]["continuous_pc_substeps"]
+    bins      = mcdc["technique"]["continuous_pc_bins"][:n_sub]
+    subtimes      = mcdc["technique"]["continuous_pc_subtimes"][:n_sub]
+
+    # -----------------------------------------------------------
+    # 2. Evaluate continuous target weight at this particle
+    # -----------------------------------------------------------
+    # Find the current substep index
+    idx = np.searchsorted(subtimes, t, side="left") - 1
+    idx = min(max(idx, 0), len(bins)-1)  # Clamp to valid range
+
+
+    w_target = bins[idx]
+    #print(get_bank_size(mcdc["bank_census"]))
+    #input()
+    # -----------------------------------------------------------
+    # 3. Compute p = w / w_target
+    # -----------------------------------------------------------
+    p = P["w"] / w_target
+    #print(bins[idx],p)
+    width = 1#2.5
+
+    # Prepare spawning array
+    P_new_arr = adapt.local_array(1, type_.particle_record)
+
+    # ===========================================================
+    # Above target weight → splitting + RR
+    # ===========================================================
+    if p > width:
+        # Set final weight
+        P["w"] = w_target
+
+        # Deterministic splitting
+        n_split = math.floor(p)
+        # Create n_split–1 new particles
+        for i in range(n_split - 1):
+            split_as_record(P_new_arr, P_arr)
+            adapt.add_active(P_new_arr, prog)
+
+        # Fractional part → Russian roulette
+        p_frac = p - n_split
+        xi = rng(P_arr)
+        if xi <= p_frac:
+            split_as_record(P_new_arr, P_arr)
+            adapt.add_active(P_new_arr, prog)
+
+    # ===========================================================
+    # Below target → Russian roulette kill / promote
+    # ===========================================================
+    elif p < 1.0 / width:
+        xi = rng(P_arr)
+        if xi > p:
+
+            # Kill particle
+            P["alive"] = False
+        else:
+            # Promote to window boundary
+            P["w"] = w_target
+
+    # ===========================================================
+    # Within the window: do nothing
+    # ===========================================================
+    return 
+
+def score_census(bank,mesh,Np):
+    flux = np.zeros(len(mesh)-1)
+    current = np.zeros(len(mesh)-1)
+    closure = np.zeros(len(mesh)-1)
+    for idx in range(get_bank_size(bank)):
+        p = bank[0][idx]
+        
+        i = np.searchsorted(mesh, p["x"]) - 1
+        if i>= len(mesh):
+            print(i,len(mesh))
+            i-=1
+        dx = mesh[i+1]-mesh[i]
+        flux[i] += p["w"]/dx
+        current[i] += p["w"] * p["ux"]/dx
+        closure[i] += p["w"] * (1/3 - p["ux"]**2)/dx
+
+    flux /= Np
+    current /= Np
+    closure /= Np
+    return flux,current,closure
+# -------------------------------
+# Step 2: Fit continuous population function
+# -------------------------------
+def sum_of_exponentials(t, *params):
+    """
+    Sum of N exponentials: a0*exp(b0*t) + a1*exp(b1*t) + ...
+    params should be [a0, b0, a1, b1, ..., aN, bN]
+    """
+    N = len(params) // 2
+    result = np.zeros_like(t)
+    for i in range(N):
+        a = params[2*i]
+        b = params[2*i+1]
+        result += a * np.exp(b*t)
+    return result
+
+from scipy.interpolate import interp1d
+import numpy as np
+
+def fit_continuous_population(t: np.ndarray, pop_vec: np.ndarray, order: int = 2, 
+                              fit_type: str = "poly", N_sub: int = 100):
+    """
+    Fit pop_vec(t) using polynomial, exponential, or interpolation,
+    and return precomputed values at N_sub substeps.
+    """
+
+    # Choose the fit
+    if fit_type == "poly" or fit_type == 3:
+        coeffs = np.polyfit(t, pop_vec, deg=order)
+        fit_fn = np.poly1d(coeffs)
+
+    elif fit_type == "exp" or fit_type == 2:
+        # Stable exponential fit
+        eps = 1e-30  
+        y = np.log(np.maximum(pop_vec, eps))
+        a, b = np.polyfit(t, y, 1)
+        fit_fn = lambda tt: np.exp(a*np.array(tt) + b)
+
+    elif fit_type == "interp" or fit_type == 1:
+        # Linear interpolation (exact fit)
+        fit_fn = interp1d(t, pop_vec, kind="linear", fill_value="extrapolate")
+
+    else:
+        raise ValueError(f"Unsupported fit_type: {fit_type}")
+
+    # Precompute bins at N_sub evenly spaced substeps
+    subtimes = np.linspace(t[0], t[-1], N_sub)
+    bins = fit_fn(subtimes)
+
+    return bins, subtimes
+
+    return bins, subtimes
+
+@njit
+def c_target(tt, coefficients, fit_type):
+    """
+    Evaluate continuous population control target at times tt.
+
+    Parameters
+    ----------
+    tt : float or 1D array
+        Time(s) to evaluate the target.
+    coefficients : 1D array
+        Coefficients of the fit.
+        - Polynomial: highest-to-lowest degree
+        - Exponential: alternating [a1,b1,a2,b2,...]
+    fit_type : int
+        1 = polynomial, 2 = sum-of-exponentials
+
+    Returns
+    -------
+    y : float or 1D array
+        Evaluated population target at times tt.
+    """
+    # Make sure tt is array-like
+    if isinstance(tt, float) or isinstance(tt, int):
+        tvals = np.array([tt], dtype=np.float64)
+        scalar_input = True
+    else:
+        tvals = np.array(tt, dtype=np.float64)
+        scalar_input = False
+
+    yvals = np.zeros_like(tvals)
+
+    if fit_type == 1:
+        # Polynomial, highest-to-lowest
+        deg = 0
+        for c in coefficients:
+            # Stop at first zero after degree?
+            if c != 0.0:
+                deg += 1
+        # Evaluate using Horner's method
+        for i in range(tvals.size):
+            val = 0.0
+            for j in range(deg):
+                val = val * tvals[i] + coefficients[j]
+            yvals[i] = val
+
+    elif fit_type == 2:
+        # Sum-of-exponentials, alternating [a1,b1,a2,b2,...]
+        n_terms = coefficients.size // 2
+        for i in range(tvals.size):
+            val = 0.0
+            for j in range(n_terms):
+                a = coefficients[2*j]
+                b = coefficients[2*j + 1]
+                val += a * np.exp(b * tvals[i])
+            yvals[i] = val
+    else:
+        # fit_type = 0 (none), return first coefficient as constant
+        for i in range(tvals.size):
+            yvals[i] = coefficients[0]
+
+    if scalar_input:
+        return yvals[0]
+    else:
+        return yvals
+    
 @njit
 def pct_combing(seed, mcdc):
     bank_census = mcdc["bank_census"]
@@ -2450,9 +2669,9 @@ def score_cs_tally(P_arr, distance, tally, data, mcdc):
         center[0] = cs_centers[0][j]
         center[1] = cs_centers[1][j]
         start[0] = x
-        start[1] = y
+        start[1] = t
         end[0] = x_final
-        end[1] = y_final
+        end[1] = t_final
 
         distance_inside = calculate_distance_in_coarse_bin(
             start, end, distance, center, cs_bin_size
@@ -3086,6 +3305,20 @@ def move_to_event(P_arr, data, mcdc):
     # Distance to time boundary
     d_time_boundary = speed * (mcdc["setting"]["time_boundary"] - P["t"])
 
+    # Particle time
+    t = P["t"]
+    n_sub     = mcdc["technique"]["continuous_pc_substeps"]
+    # Subcensus times
+    subtimes = mcdc["technique"]["continuous_pc_subtimes"][:n_sub]
+
+    # Find index of the first future subcensus time
+    idx_next = np.searchsorted(subtimes, t, side="right")
+    if idx_next >= len(subtimes):
+        # No future subcensus, set a large distance
+        d_time_subcensus = np.inf
+    else:
+        d_time_subcensus = speed * (subtimes[idx_next] - t)
+
     # Distance to census time
     idx = mcdc["idx_census"]
     d_time_census = speed * (mcdc["setting"]["census_time"][idx] - P["t"])
@@ -3123,6 +3356,13 @@ def move_to_event(P_arr, data, mcdc):
         P["surface_ID"] = -1
     elif geometry.check_coincidence(d_time_census, distance):
         P["event"] += EVENT_TIME_CENSUS
+
+    # Check distance to subcensus time boundary
+    if d_time_subcensus < distance + COINCIDENCE_TOLERANCE:
+        distance = d_time_subcensus
+        apply_continuous_pc(P_arr,mcdc)
+
+        P["event"] = EVENT_SUBCENSUS
 
     # Check distance to time boundary (exclusive event)
     if d_time_boundary < distance + COINCIDENCE_TOLERANCE:
@@ -3924,6 +4164,7 @@ def weight_window(P_arr, prog):
         else:
             P["w"] = w_target
 
+
 def save_weight_window_data(name, data,file = "ww_data.h5"):
     """
     Appends or creates a dataset in ww_data.h5 for the given named quantity.
@@ -3934,7 +4175,12 @@ def save_weight_window_data(name, data,file = "ww_data.h5"):
     - overwrite (bool): If True, creates a new file and dataset
     - out_dir (str): Directory to save the HDF5 file (default is current)
     """
-    data = np.squeeze(data)
+    if MPI.COMM_WORLD.Get_rank() != 0:
+        return
+    if np.isscalar(data):
+        data = np.array([data])
+    else:
+        data = np.squeeze(data)
     with h5py.File(file, "a") as f:
         if name not in f:
             maxshape = (None, data.shape[0])  # Unlimited rows, fixed width
@@ -3945,17 +4191,37 @@ def save_weight_window_data(name, data,file = "ww_data.h5"):
             dset[-1, :] = data
 
 @njit
-def update_weight_windows(data, mcdc):
+def update_weight_windows(data, mcdc, work_idx = 0,census_time = 0,u=0):
+    census_times = mcdc["setting"]["census_time"]
+    census_times = np.insert(census_times, 0, 0.0)
+    ww_times = mcdc["technique"]["ww"]["mesh"]["t"]
 
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
+    t0 = census_times[idx_census]
 
-    # initialize ww_data file
-    if idx_census == 0:
-        if os.path.isfile(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"):
-            os.system("rm -rf "+str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
-        with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "w") as f:
-            f.close()
+    t1 = census_times[idx_census+1]
+    
+    left_edges  = ww_times[:-1]
+    right_edges = ww_times[1:]
+    previous_ww = mcdc["technique"]["ww"]["center"][np.isclose(right_edges,t0),:,:,:]
+
+    mask = (left_edges  >=  t0 ) & (right_edges <= t1 )
+
+
+    # Get indices of the selected cells
+    ww_cell_indices = np.where(mask)[0]
+
+    # Use the first left edge to last right edge of selected cells
+    if len(ww_cell_indices) > 0:
+        i0 = ww_cell_indices[0]
+        i1 = ww_cell_indices[-1] + 1   # +1 to include last cell's right edge
+        ww_edges = ww_times[i0:i1+1]  # continuous edges
+    else:
+        ww_edges = np.array([])
+
+    
+    wws  = mcdc["technique"]["ww"]["center"][mask,:,:,:]
 
     center = np.copy(mcdc["technique"]["ww"]["center"][idx_census])
     epsilon = mcdc["technique"]["ww"]["epsilon"]
@@ -3975,39 +4241,210 @@ def update_weight_windows(data, mcdc):
         mcdc["technique"]["ww"]["center"][idx_census] = center
 
     elif mcdc["technique"]["ww"]["auto"] == WW_HYBRID:
-        center = ww_hybrid(data, mcdc)
+        center = ww_hybrid(data, mcdc,work_idx=work_idx,u = u)
+
         mcdc["technique"]["ww"]["center"][idx_census] = center
 
-    mcdc["technique"]["ww"]["center"][idx_census] /= np.max(
-        mcdc["technique"]["ww"]["center"][idx_census]
-    )
-    if epsilon[WW_MIN] > 0:
-        mcdc["technique"]["ww"]["center"][idx_census] = (
-            mcdc["technique"]["ww"]["center"][idx_census]
-            * (1 - epsilon[WW_MIN])
-            + epsilon[WW_MIN]
+    elif mcdc["technique"]["ww"]["auto"] == WW_HYBRID_SUBSTEP:
+        diagnostic = True
+        hybrid_dt = 0.02
+        
+        N_substep = int((t1-t0+1e-10)/hybrid_dt)
+        print(N_substep)
+
+        hybrid_flux = ww_hybrid_substep(data, mcdc,t0,t1,N_substep)
+
+        if idx_census == 0:
+            mcdc["technique"]["pc_factor"] /= np.mean(hybrid_flux)
+            #hybrid_flux 
+        ww_t_mesh = ww_edges
+        ww_x_mesh = mcdc["technique"]["ww"]["mesh"]["x"]
+        
+        hybrid_t_mesh = np.linspace(t0, t1, N_substep + 1)
+        hybrid_x_mesh = mesh = mcdc["technique"]["losm"]["mesh"]["x"]
+        
+
+        wws = prolong_2d(
+        F_old=hybrid_flux,
+        t_old_edges=hybrid_t_mesh,
+        x_old_edges=hybrid_x_mesh,
+        t_new_edges=ww_t_mesh,
+        x_new_edges=ww_x_mesh,
+        method="linear",
+        log_interp=True,   # important for flux/weight windows
         )
-        arr = mcdc["technique"]["ww"]["center"][idx_census]
-        for i in range(arr.shape[0]):
-            for j in range(arr.shape[1]):
-                for k in range(arr.shape[2]):
-                    if arr[i, j, k] <= 0:
-                        arr[i, j, k] = epsilon[WW_MIN]
-    if epsilon[WW_WOLLABER1] > 0:
-        w_min = epsilon[WW_WOLLABER2]
-        mcdc["technique"]["ww"]["center"][idx_census] = (
+        if diagnostic:
+            import matplotlib.pyplot as plt
+            from matplotlib.colors import LogNorm
+
+            print("\n" + "="*60)
+            print("HYBRID → WW WEIGHT WINDOW UPDATE DIAGNOSTIC")
+            print("="*60)
+
+            # --- Summary info ---
+            print(f"Hybrid substeps: {N_substep} between t0={t0:.5e} and t1={t1:.5e}")
+
+            print("\nHybrid flux (fine mesh):")
+            print(f"  shape: {hybrid_flux.shape}")
+            print(f"  t range: [{hybrid_t_mesh[0]:.5e}, {hybrid_t_mesh[-1]:.5e}]")
+            print(f"  x range: [{hybrid_x_mesh[0]:.5e}, {hybrid_x_mesh[-1]:.5e}]")
+            print(f"  min/max: {hybrid_flux.min():.3e} / {hybrid_flux.max():.3e}")
+
+            print("\nProjected WW flux:")
+            print(f"  shape: {wws.shape}")
+            print(f"  t length: {len(ww_t_mesh)}, x length: {len(ww_x_mesh)}")
+            print(f"  min/max: {wws.min():.3e} / {wws.max():.3e}")
+
+            print("="*60 + "\n")
+
+            # --- Compute difference ---
+            # Pad or interpolate hybrid flux to WW mesh shape if needed
+            # For now assume they have the same shape in Nt, Nx
+            plt.clf()
+            plt.pcolormesh(np.squeeze(mcdc["technique"]["ww"]["center"][:,:,:,:]),norm=LogNorm())
+            plt.colorbar()
+            plt.show()
+            # --- Plot hybrid, prolonged, and difference ---
+            fig, axs = plt.subplots(1,2, figsize=(12, 5), constrained_layout=True)
+
+            # Hybrid flux
+            im0 = axs[0].pcolormesh(hybrid_flux, norm=LogNorm(), cmap="viridis")
+            axs[0].set_title("Hybrid flux (fine mesh)")
+            axs[0].set_xlabel("x index")
+            axs[0].set_ylabel("t index")
+            fig.colorbar(im0, ax=axs[0], label="Flux")
+
+            # Prolonged WW flux
+            im1 = axs[1].pcolormesh(wws, norm=LogNorm(), cmap="viridis")
+            axs[1].set_title("Projected WW flux")
+            axs[1].set_xlabel("x index")
+            axs[1].set_ylabel("t index")
+            fig.colorbar(im1, ax=axs[1], label="Flux")
+
+            plt.suptitle(f"Hybrid → WW flux projection: t0={t0:.3e}, t1={t1:.3e}", fontsize=14)
+            plt.show()
+
+            input("Press Enter to continue...")
+
+        wws = wws[:, :, None, None]
+        mcdc["technique"]["ww"]["center"][mask,:,:,:] = wws
+
+    if mcdc["technique"]["ww"]["auto"] != WW_HYBRID_SUBSTEP:
+        mcdc["technique"]["ww"]["center"][idx_census] /= np.max(
             mcdc["technique"]["ww"]["center"][idx_census]
-        ) * (
-            1
-            + (1 / epsilon[WW_WOLLABER1] - 1)
-            * np.exp(
-                -(mcdc["technique"]["ww"]["center"][idx_census] - w_min)
-                / epsilon[WW_WOLLABER1]
+        )
+        if epsilon[WW_MIN] > 0:
+            mcdc["technique"]["ww"]["center"][idx_census] = (
+                mcdc["technique"]["ww"]["center"][idx_census]
+                * (1 - epsilon[WW_MIN])
+                + epsilon[WW_MIN]
             )
-        )
+            arr = mcdc["technique"]["ww"]["center"][idx_census]
+            for i in range(arr.shape[0]):
+                for j in range(arr.shape[1]):
+                    for k in range(arr.shape[2]):
+                        if arr[i, j, k] <= 0:
+                            arr[i, j, k] = epsilon[WW_MIN]
+        if epsilon[WW_WOLLABER1] > 0:
+            w_min = epsilon[WW_WOLLABER2]
+            mcdc["technique"]["ww"]["center"][idx_census] = (
+                mcdc["technique"]["ww"]["center"][idx_census]
+            ) * (
+                1
+                + (1 / epsilon[WW_WOLLABER1] - 1)
+                * np.exp(
+                    -(mcdc["technique"]["ww"]["center"][idx_census] - w_min)
+                    / epsilon[WW_WOLLABER1]
+                )
+            )
+    
     file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"
-    save_weight_window_data("window_center",mcdc["technique"]["ww"]["center"][idx_census],file = file)
+    if work_idx == 0:
+        save_weight_window_data("window_center",mcdc["technique"]["ww"]["center"][idx_census],file = file)
+    else:
+        save_weight_window_data("window_center_u"+str(u),mcdc["technique"]["ww"]["center"][idx_census],file = file)
     return
+
+import numpy as np
+from scipy.interpolate import RegularGridInterpolator, RectBivariateSpline
+
+def prolong_2d(
+    F_old,
+    t_old_edges,
+    x_old_edges,
+    t_new_edges,
+    x_new_edges,
+    method="linear",
+    log_interp=False,
+):
+    """
+    Prolong (interpolate) a 2D field F_old(t,x) from an old mesh
+    to a new time-space mesh defined by edges.
+
+    Parameters
+    ----------
+    F_old : ndarray, shape (Nt_old, Nx_old)
+        Old field values on the cell-centered mesh.
+
+    t_old_edges, x_old_edges : 1D arrays
+        Old mesh edges for time and space.
+
+    t_new_edges, x_new_edges : 1D arrays
+        New mesh edges for time and space.
+
+    method : "linear" | "nearest" | "spline"
+        Interpolation method.
+
+    log_interp : bool
+        Apply interpolation in log-space (recommended for flux/ww).
+
+    Returns
+    -------
+    F_new : ndarray, shape (Nt_new, Nx_new)
+    """
+
+    # ---- Compute old/new cell centers ----
+    t_old = 0.5 * (t_old_edges[:-1] + t_old_edges[1:])
+    x_old = 0.5 * (x_old_edges[:-1] + x_old_edges[1:])
+
+    t_new = 0.5 * (t_new_edges[:-1] + t_new_edges[1:])
+    x_new = 0.5 * (x_new_edges[:-1] + x_new_edges[1:])
+    
+    # ---- Protect log interpolation ----
+    if log_interp:
+        # small positive floor
+        eps = np.min(F_old[F_old > 0]) * 0.5
+        F_safe = np.where(F_old > 0, F_old, eps)
+        F_use = np.log(F_safe)
+    else:
+        F_use = F_old
+
+    # ---- Choose interpolation method ----
+    if method == "spline":
+        # RectBivariateSpline expects strictly monotonic
+        spline = RectBivariateSpline(t_old, x_old, F_use, kx=3, ky=3)
+        F_new = spline(t_new, x_new)
+    else:
+        # RegularGridInterpolator
+        interp = RegularGridInterpolator(
+            (t_old, x_old),
+            F_use,
+            method=method,
+            bounds_error=False,
+            fill_value=None,
+        )
+
+        # Make new mesh grid
+        TT, XX = np.meshgrid(t_new, x_new, indexing="ij")
+        pts = np.column_stack((TT.ravel(), XX.ravel()))
+
+        F_new = interp(pts).reshape(len(t_new), len(x_new))
+
+    # ---- Undo log transform ----
+    if log_interp:
+        F_new = np.exp(F_new)
+
+    return F_new
 
 def get_tally(idx, mcdc, data, score,type="mesh"):
     # Determine the correct tally list based on tally_type
@@ -4071,6 +4508,7 @@ def get_tally(idx, mcdc, data, score,type="mesh"):
                 mean = score_tally_bin[TALLY_SUM]
 
         N_particle = mcdc["setting"]["N_particle"]
+        work_size = mcdc["mpi_work_size"]
         if type == "mesh":
             scaled_tally = mean[idx][:]/(N_particle*dx*dt[0])
         elif type == "edge":
@@ -4224,7 +4662,7 @@ def ww_dmd(data, mcdc):
             center = np.ones_like(mcdc["technique"]["ww"]["center"][idx_census])
     return center
 
-def get_hybrid_ics(data,mcdc):
+def get_hybrid_ics(data,mcdc,work_idx=0):
     # accessing most recent tally dump
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
@@ -4304,7 +4742,7 @@ def get_hybrid_ics(data,mcdc):
         save_weight_window_data("IC_current.3",current[3,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
 
     elif space_scheme == HYBRID_FV:
-        print("gettin ics")
+        #print("gettin ics")
         # first timestep 0 initial condition
         if idx_census == 0:
             old_flux = np.zeros((Nx+2))
@@ -4332,19 +4770,21 @@ def get_hybrid_ics(data,mcdc):
             elif initial_conditions == HYBRID_IC_HYBRID: # full hybrid initial conditions
                 old_flux = np.zeros((Nx+2))
                 old_current = np.zeros((Nx+1))
+                N_update = str(int(mcdc["technique"]["ww"]["epsilon"][WW_N_UPDATE]))
+
                 with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "r") as f:
-                    old_flux[:] = np.copy(f["soln_flux_mean"][-1,:])
-                    old_current[:] = np.copy(f["soln_current_mean"][-1,:])
+                    old_flux[:] = np.copy(f["soln_flux_mean_u"+N_update][-1,:])
+                    old_current[:] = np.copy(f["soln_current_mean_u"+N_update][-1,:])
                  
         old_state = old_flux, old_current
         # saving initial conditions
-
-        save_weight_window_data("IC_flux",old_flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
-        save_weight_window_data("IC_current",old_current,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        if work_idx == 0:
+            save_weight_window_data("IC_flux",old_flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+            save_weight_window_data("IC_current",old_current,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
 
     return old_state
 
-def get_hybrid_closure(data,mcdc):
+def get_hybrid_closure(data,mcdc,work_idx=0,u=0):
     # accessing most recent tally dump
     idx_batch = mcdc["idx_batch"]
     idx_census = mcdc["idx_census"]
@@ -4357,7 +4797,7 @@ def get_hybrid_closure(data,mcdc):
     t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census-1]
     t1 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
     Nx = mcdc["technique"]["ww"]["mesh"]["Nx"]
-
+    dx = mesh_x[1]-mesh_x[0]
     if space_scheme == HYBRID_FE:
         # Load previous timestep tally data
         # Flux and moments
@@ -4378,7 +4818,7 @@ def get_hybrid_closure(data,mcdc):
         F = np.zeros((4,Nx)) 
         P = np.zeros((4,Nx)) 
         T = np.zeros((4,Nx)) 
-
+        
         for i in range(Nx):
             F[0,i] = F0[i]
             F[1,i] = F1[i]
@@ -4398,13 +4838,31 @@ def get_hybrid_closure(data,mcdc):
     elif space_scheme == HYBRID_FV:
         # Load previous timestep tally data
         # Flux and moments
-        phi = get_tally(idx_census-1, mcdc, data, SCORE_FLUX,"mesh")
-        phi_old = get_tally(idx_census-2, mcdc, data, SCORE_FLUX,"mesh")
+        if work_idx == 0: # lagged closure
+            phi = get_tally(idx_census-1, mcdc, data, SCORE_FLUX,"census")
+            F = get_tally(idx_census-1, mcdc, data, SCORE_SECOND_MOMENT,"census")
 
-        F = get_tally(idx_census-1, mcdc, data, SCORE_SECOND_MOMENT,"mesh")
-        F_old = get_tally(idx_census-2, mcdc, data, SCORE_SECOND_MOMENT,"mesh")
+        else: # updated closure
 
+            N_update = int(mcdc["technique"]["ww"]["epsilon"][WW_N_UPDATE]) + 1
+            work_size = mcdc["mpi_work_size"]
+            scale_factor = work_size / work_idx
+            phi = get_tally(idx_census, mcdc, data, SCORE_FLUX,"census")*scale_factor
+            F = get_tally(idx_census, mcdc, data, SCORE_SECOND_MOMENT,"census")*scale_factor
 
+            active_bank_size = get_bank_size(mcdc["bank_active"])
+            census_bank_size = get_bank_size(mcdc["bank_census"])
+            source_bank_size = get_bank_size(mcdc["bank_source"])
+
+            save_weight_window_data("mc_flux_u"+str(u),phi,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+            save_weight_window_data("active_bank_u"+str(u),active_bank_size,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+            save_weight_window_data("census_bank_u"+str(u),census_bank_size,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+            save_weight_window_data("source_bank_u"+str(u),source_bank_size,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+
+        phi_old = get_tally(idx_census-1, mcdc, data, SCORE_FLUX,"census")
+        F_old = get_tally(idx_census-1, mcdc, data, SCORE_SECOND_MOMENT,"census")
+
+    
         closure = (phi/3 - F)
         closure_old = (phi_old/3 - F_old)
         # initializing arrays
@@ -4426,15 +4884,19 @@ def get_hybrid_closure(data,mcdc):
             F_previous = filter_data(epsilon[WW_FILTER1], epsilon[WW_FILTER2], F_previous)
 
         # creating closure dict
-        closure={'F':F_new,
-                'previous_F':F_previous,
+        closure={'F':np.zeros_like(F_new),
+                'previous_F':np.zeros_like(F_previous),
                 'Pl':Pl,
                 'Pr':Pr}
         # saving closure data
 
-        save_weight_window_data("F",F_new,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
-        save_weight_window_data("F_previous",F_previous,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("F_u"+str(u),F_new,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        if work_idx == 0:
+            save_weight_window_data("F_previous",F_previous,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
         #save_weight_window_data("F",F)
+
+        
+        
 
     return closure
 
@@ -4448,7 +4910,7 @@ def plot_moments(name,moments):
     plt.legend()
     plt.show()
 
-def ww_hybrid(data, mcdc):
+def ww_hybrid(data, mcdc,work_idx=0,u=0):
     idx_census = mcdc["idx_census"]
     epsilon = mcdc["technique"]["ww"]["epsilon"]
     t0 = mcdc["technique"]["ww"]["mesh"]["t"][idx_census]
@@ -4457,19 +4919,16 @@ def ww_hybrid(data, mcdc):
     Ny = mcdc["technique"]["ww"]["mesh"]["Ny"]
     Nz = mcdc["technique"]["ww"]["mesh"]["Nz"]
     dt = t1-t0
-    print(dt)
 
     x = mcdc["technique"]["ww"]["mesh"]["x"]
 
     problem = losm_create_problem(mcdc)
-
     if problem["space_scheme"] == HYBRID_FE:
         old_state = get_hybrid_ics(data,mcdc)
         closure = get_hybrid_closure(data,mcdc)
 
         # hybrid finite element (linear discontinous) solve
         new_flux,new_current = losm_FE_step_time(problem,old_state,closure,dt=dt)    
-
         # saving solution to low order problem
         save_weight_window_data("soln_flux.0",new_flux[0,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
         save_weight_window_data("soln_flux.1",new_flux[1,:],file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
@@ -4487,8 +4946,9 @@ def ww_hybrid(data, mcdc):
         save_weight_window_data("soln_flux_mean",mean_flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
     
     if problem["space_scheme"] == HYBRID_FV:
-        old_state = get_hybrid_ics(data,mcdc)
-        closure = get_hybrid_closure(data,mcdc)
+        old_state = get_hybrid_ics(data,mcdc,work_idx=work_idx)
+        closure = get_hybrid_closure(data,mcdc,work_idx=work_idx,u=u)
+
         '''# ONLY USE FOR DEBUGGING (PURE DETERMINISTIC SOLVE)
         if idx_census == 0:#running deterministic problem for diagnotics:
             soln_flux = np.zeros((20,Nx+2))
@@ -4521,11 +4981,12 @@ def ww_hybrid(data, mcdc):
         
         '''
         # hybrid finiten volume solve
+        
         flux,current = losm_FV_step_time(problem,old_state,closure,dt=dt)    
 
         # saving solution to low order problem
-        save_weight_window_data("soln_flux_mean",flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
-        save_weight_window_data("soln_current_mean",current,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_flux_mean_u"+str(u),flux,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+        save_weight_window_data("soln_current_mean_u"+str(u),current,file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
         mean_flux = np.zeros((Nx,1,1))
         mean_flux[:,0,0]= flux[1:-1]
     center = np.zeros((Nx,1,1))
@@ -4536,22 +4997,155 @@ def ww_hybrid(data, mcdc):
 
 
     return center
+import numpy as np
+import numpy as np
+from numba import objmode
 
-@njit
+def ww_hybrid_substep(data, mcdc, t0, t1, N_substep):
+    """
+    Compute hybrid LOSM flux solutions on N_substep subintervals.
+    Prints a progress bar using mcdc["setting"]["progress_bar"].
+    
+    Returns
+    -------
+    sol : np.ndarray
+        Array of shape (N_substep, Nx) containing flux solutions (WITHOUT ghost cells)
+    """
+
+    subtimes = np.linspace(t0, t1, N_substep + 1)
+
+    # ---------------------------------------------------------------
+    # Prepare problem and score census
+    # ---------------------------------------------------------------
+    problem = losm_create_problem(mcdc)
+    problem["time_scheme"] = HYBRID_BE
+    pc_factor = mcdc["technique"]["pc_factor"]
+    flux_, current_, closure_ = score_census(
+        mcdc["bank_source"], 
+        problem["x_mesh"], 
+        mcdc["setting"]["N_particle"]
+    )
+
+    dt_full = t1 - t0
+
+    #flux_    *= pc_factor
+    #current_ *= pc_factor
+    #closure_ *= pc_factor
+
+    Nx = len(flux_)
+
+    # ---------------------------------------------------------------
+    # Pad arrays
+    # ---------------------------------------------------------------
+    flux = np.zeros(Nx + 2)
+    flux[1:-1] = flux_
+    flux[0]    = flux_[0]
+    flux[-1]   = flux_[-1]
+
+    current = np.zeros(Nx + 1)
+    current[1:] = current_
+    current[0]  = current_[0]
+
+    closure = np.zeros(Nx + 2)
+
+    old_state = [flux.copy(), current.copy()]
+
+    closure_dict = {
+        "F": closure.copy(),
+        "previous_F": closure.copy(),
+        "Pl": 0,
+        "Pr": 0
+    }
+
+    hybrid_solutions = []
+
+    # Progress bar counter
+    N_prog = -1  # matches your logic
+
+    prev_source = problem["source"]
+    print_msg("running hybrid problem")
+    # ---------------------------------------------------------------
+    # Hybrid substeps with progress bar
+    # ---------------------------------------------------------------
+    for i in range(1, len(subtimes)):
+
+        t_start = subtimes[i - 1]
+        t_end   = subtimes[i]
+        dt      = t_end - t_start
+
+        # Rebuild subproblem
+        problem = losm_create_problem(
+            mcdc, 
+            t=(t_start, t_end)
+        )
+        problem["time_scheme"] = HYBRID_BE
+        problem["previous_source"] = prev_source
+        # FV step
+        flux_new, current_new = losm_FV_step_time(
+            problem, 
+            old_state, 
+            closure_dict, 
+            dt=dt
+        )
+
+        # Store flux WITHOUT ghost cells
+        hybrid_solutions.append(flux_new[1:-1].copy())
+
+        # Update state
+        old_state[0] = flux_new.copy()
+        old_state[1] = current_new.copy()
+        prev_source = problem["source"]
+
+        # -----------------------------------------------------------
+        # Progress printout (your exact logic)
+        # -----------------------------------------------------------
+        percent = (i) / N_substep
+
+        if mcdc["setting"]["progress_bar"] and int(percent * 100.0) > N_prog:
+            N_prog += 1
+            with objmode():
+                print_progress(percent, mcdc)
+
+    return np.array(hybrid_solutions)
+
 def filter_data(w, k, data):
     if w == FILTER_UNIFORM:
-        return sp.ndimage.uniform_filter(data, k, mode="nearest")
+        size =2*k+1
+        nonzero_mask = data != 0
+        filtered = np.zeros_like(data)
+        filtered[nonzero_mask] = sp.ndimage.uniform_filter(
+            data * nonzero_mask, size, mode="nearest"
+        )[nonzero_mask]
+        return filtered
+
     elif w == FILTER_FOURIER:
-        freq_data = np.fft.fftn(data)
-        freq_grid = np.fft.fftfreq(data.shape[0])
-        if data.ndim > 1:
-            freq_grid = np.meshgrid(
-                *[np.fft.fftfreq(n) for n in data.shape], indexing="ij"
-            )
-            freq_grid = np.sqrt(sum(f**2 for f in freq_grid))
-        mask = freq_grid < (1 / k)
-        filtered_freq_data = freq_data * mask
-        return np.fft.ifftn(filtered_freq_data).real
+        k= int(k)
+        nonzero_mask = data != 0
+        freq_data = np.fft.fftn(data * nonzero_mask)
+
+        freq_grids = np.meshgrid(
+            *[np.fft.fftfreq(n) for n in data.shape], indexing="ij"
+        )
+        freq_magnitude = np.sqrt(sum(f**2 for f in freq_grids))
+
+        flat_indices = np.argsort(freq_magnitude, axis=None)
+        # Keep only k lowest modes, or all if k too large
+        flat_indices = flat_indices[:min(k, flat_indices.size)]
+
+        # Use ravel() instead of .flat
+        mask = np.zeros_like(freq_data, dtype=bool)
+        mask_ravel = mask.ravel()
+        mask_ravel[flat_indices] = True
+        mask = mask_ravel.reshape(mask.shape)
+
+        filtered_freq_data = np.zeros_like(freq_data)
+        filtered_freq_data[mask] = freq_data[mask]
+
+        filtered = np.fft.ifftn(filtered_freq_data).real
+        result = data.copy()
+        result[nonzero_mask] = filtered[nonzero_mask]
+        return result
+
     else:
         return data
 

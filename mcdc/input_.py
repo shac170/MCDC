@@ -21,7 +21,6 @@ from mcdc.card import (
     UniverseCard,
     LatticeCard,
     SourceCard,
-    MeshTallyCard,
 )
 from mcdc.constant import (
     GYRATION_RADIUS_ALL,
@@ -54,6 +53,8 @@ from mcdc.constant import (
     WW_HYBRID_IC,
     WW_SPACE_DISC,
     WW_TIME_DISC,
+    WW_N_UPDATE,
+    WW_HYBRID_SUBSTEP,
     HYBRID_FE,
     HYBRID_BE,
     HYBRID_CN,
@@ -1229,16 +1230,27 @@ def weighted_emission(flag):
     card["weighted_emission"] = flag
 
 
-def population_control(pct="splitting-roulette"):
+def population_control(
+    pct="splitting-roulette",
+    continuous_type="poly",
+    continuous_order=1,
+    continuous_substeps=10,
+):
     """
     Set population control techniques.
 
     Parameters
     ----------
-    pct : str, optional
-        Population control method (default "spliting-roulette").
+    pct : str
+        Population control method.
+    continuous_type : str
+        Type of continuous fitting ("poly", "exp", "none").
+    continuous_order : int
+        Polynomial degree OR exponential order.
+    continuous_substeps : int
+        Number of substeps inside each census interval.
     """
-    # Check if the selected technique is supported
+
     pct = check_support(
         "population control technique",
         pct,
@@ -1247,13 +1259,20 @@ def population_control(pct="splitting-roulette"):
             "combing-weight",
             "splitting-roulette",
             "splitting-roulette-weight",
+            "hybrid",
         ],
     )
+
+    # Store data in input deck
     card = global_.input_deck.technique
     card["pct"] = pct
     card["population_control"] = True
     card["weighted_emission"] = False
 
+    # NEW FIELDS
+    card["continuous_pc_type"] = continuous_type
+    card["continuous_pc_order"] = continuous_order
+    card["continuous_pc_substeps"] = continuous_substeps
 
 def branchless_collision():
     """
@@ -1400,6 +1419,7 @@ def weight_window(
     azi=np.array([-PI, PI]),
     g=np.array([-INF, INF]),
     E=np.array([0.0, INF]),
+    t=np.array([None]),
     window=None,
     width=2.5,
     method={"user"},
@@ -1434,10 +1454,12 @@ def weight_window(
         A weight window card.
 
     """
+    if t[0] ==None:
 
-    census_t = global_.input_deck.setting["census_time"]
-    t = np.zeros(len(census_t) + 1)
-    t[1:] = census_t
+        census_t = global_.input_deck.setting["census_time"]
+        t = np.zeros(len(census_t) + 1)
+        t[1:] = census_t
+
     card = global_.input_deck.technique
     card["weight_window"] = True
     N_update = 0
@@ -1451,7 +1473,7 @@ def weight_window(
     method_checked = check_support(
         "Weight window method",
         method,
-        ["user", "previous", "alpha", "dmd","hybrid"],
+        ["user", "previous", "alpha", "dmd","hybrid","hybrid-substep"],
     )
     if method_checked == "user":
         card["ww"]["auto"] = WW_USER
@@ -1467,6 +1489,8 @@ def weight_window(
 
     elif method_checked == "hybrid":
         card["ww"]["auto"] = WW_HYBRID
+    elif method_checked == "hybrid-substep":
+        card["ww"]["auto"] = WW_HYBRID_SUBSTEP
 
     # Checking techniques
     for mod in modifications:
@@ -1479,7 +1503,9 @@ def weight_window(
              "filter",
              "hybrid-ic",
              "space-discretization",
-             "time-discretization"]
+             "time-discretization",
+             "update-fractions",
+             "n-update"]
         )
         if mod_checked == "min-center":
             card["ww"]["epsilon"][WW_MIN] = mod[1]
@@ -1523,7 +1549,14 @@ def weight_window(
                 card["ww"]["epsilon"][WW_TIME_DISC] = HYBRID_CN
             else:
                 print("Invalid time-discretization! please choose 'BE' (backward Euler) or 'CN' (Crank-Nicolson)")
-
+        if mod_checked == "n-update":
+            card["ww"]["epsilon"][WW_N_UPDATE] = mod[1]
+        if mod_checked == "update-fractions":
+            card["ww"]["update_fractions"] = mod[1]
+    if len(np.array(card["ww"]["update_fractions"])[np.array(card["ww"]["update_fractions"])!=0]) > 0:
+        card["ww"]["epsilon"][WW_N_UPDATE] = len(card["ww"]["update_fractions"])
+    else:
+        card["ww"]["update_fractions"] = (np.arange(1,card["ww"]["epsilon"][WW_N_UPDATE]+2)/(card["ww"]["epsilon"][WW_N_UPDATE]+1))[:-1]
     # Set mesh
     card["ww"]["mesh"]["x"] = x
     card["ww"]["mesh"]["y"] = y

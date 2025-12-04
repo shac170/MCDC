@@ -1,15 +1,16 @@
 from mpi4py import MPI
 from numba import njit, objmode
-
+import os
+import h5py
 import shutil
-
+import time
 import mcdc.config as config
 import mcdc.adapt as adapt
 import mcdc.src.geometry as geometry
 import mcdc.kernel as kernel
 import mcdc.print_ as print_module
 import mcdc.type_ as type_
-
+import mcdc.losm.losm_kernel as losm_kernel
 from mcdc.constant import *
 from mcdc.print_ import (
     print_header_batch,
@@ -20,6 +21,8 @@ from mcdc.print_ import (
     print_progress_eigenvalue,
     print_progress_iqmc,
 )
+import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 
 caching = config.caching
 
@@ -85,7 +88,19 @@ def loop_fixed_source(data_arr, mcdc_arr):
                 kernel.uq_reset(mcdc, seed_uq)
 
         # Loop over time censuses
+        bins =[1.0]
+        pop_factor = 1.0
+        target_weight = 1.0  # starting weight at first census
+
         for idx_census in range(mcdc["setting"]["N_census"]):
+            census_start_time = time.time()
+            if idx_census == 0:
+                if MPI.COMM_WORLD.Get_rank() == 0:
+                    if os.path.isfile(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"):
+                        os.system("rm -rf "+str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5")
+                    with h5py.File(str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5", "w") as f:
+                        f.close()
+
             mcdc["idx_census"] = idx_census
             seed_census = kernel.split_seed(seed_batch, SEED_SPLIT_CENSUS)
 
@@ -103,7 +118,173 @@ def loop_fixed_source(data_arr, mcdc_arr):
                     for i in range(N_bin):
                         tally["filter"]["t"][i + 1] = tally["filter"]["t"][i] + dt
 
+            if (
+                mcdc["technique"]["population_control"]
+                and mcdc["technique"]["pct"] == PCT_HYBRID
+            ):
+                diagnostics = True
+                Nsub = mcdc["technique"]["continuous_pc_substeps"]
+
+                # Time interval
+                if idx_census == 0:
+                    t_start = 0.0
+                else:
+                    t_start = mcdc["setting"]["census_time"][idx_census - 1]
+
+                t_end = mcdc["setting"]["census_time"][idx_census]
+                subtimes = np.linspace(t_start, t_end, Nsub + 1)
+
+                problem = losm_kernel.losm_create_problem(mcdc)
+                problem["time_scheme"] = HYBRID_BE
+
+                # Score census → ICs
+                flux_, current_, closure_ = kernel.score_census(
+                    mcdc["bank_source"], problem["x_mesh"], mcdc["setting"]["N_particle"]
+                )
+
+
+                flux_ /= t_end-t_start
+                current_ /= t_end-t_start
+                closure_ /= t_end-t_start
+                # Pad with ghost cells for flux
+                flux = np.zeros(len(flux_) + 2)
+                flux[1:-1] = flux_
+                flux[0] = flux_[0]
+                flux[-1] = flux_[-1]
+
+                # Closure padded
+                closure = np.zeros(len(flux_) + 2)
+                #closure[1:-1] = closure_
+                #closure[0] = closure_[0]
+                #closure[-1] = closure_[-1]
+
+                # Current padded
+                current = np.zeros(len(flux_) + 1)
+                current[1:] = current_
+                current[0] = current_[0]
+
+                # Initial state
+                old_state = [flux, current]
+                ics_copy = [np.copy(flux),np.copy(current)]
+                closure1 = {
+                    "F": closure,
+                    "previous_F": closure,
+                    "Pl": 0,
+                    "Pr": 0,
+                }
+                # -----------------------------------------------------------
+                # Hybrid sub-step solutions with proper target weight growth
+                # -----------------------------------------------------------
+                hybrid_solutions = []
+                for n_hybrid in range(1, len(subtimes)):
+                    # 1. Substep width
+                    dt = subtimes[n_hybrid] - subtimes[n_hybrid - 1]
+                    # 2. Save previous source
+                    prev_source = problem["source"]
+                    # 3. Rebuild problem for this substep
+                    problem = losm_kernel.losm_create_problem(
+                        mcdc, t=(subtimes[n_hybrid - 1], subtimes[n_hybrid])
+                    )
+                    problem["time_scheme"] = HYBRID_BE
+                    problem["previous_source"] = prev_source
+
+                    # 4. One FV step
+                    flux, current = losm_kernel.losm_FV_step_time(
+                        problem, old_state, closure1, dt=dt
+                    )
+
+                    # 5. Save FV solution and update state
+                    hybrid_solutions.append(flux.copy())
+                    old_state[0] = flux.copy()
+                    old_state[1] = current.copy()
+
+                # Convert to array
+                hybrid_solutions = np.array(hybrid_solutions)
+                
+                # Population vector (absolute, not normalized)
+                population_vector = np.sum(hybrid_solutions, axis=1)
+
+                # Fit continuous population control
+                fit_type = mcdc["technique"]["continuous_pc_type"]
+                order    = mcdc["technique"]["continuous_pc_degree"]
+                previous_gain = bins[-1]
+
+                bins, bin_times = kernel.fit_continuous_population(
+                    t=subtimes[1:], pop_vec=population_vector, order=order, fit_type=fit_type, N_sub=Nsub
+                )
+                #bins += previous_gain
+
+                # Store precomputed bins and substep times
+                mcdc["technique"]["continuous_pc_bins"][:len(bins)] = bins[:1000]
+                mcdc["technique"]["continuous_pc_subtimes"][:len(bins)] = bin_times[:1000]
+
+                # ============================================================
+                #                DIAGNOSTIC PLOTS 
+                # ============================================================
+                if diagnostics:
+                    plt.clf()
+                    plt.pcolormesh(np.array(sig_fs))
+                    plt.show()
+    
+                    cell_idx = np.arange(len(flux))  # x-axis for ICs
+
+                    fig, axes = plt.subplots(3, 3, figsize=(18, 8))
+                    axes = axes.flatten()
+
+                    # --- Population vs fitted C(t) ---
+                    axes[0].plot(subtimes[1:], population_vector, marker="o", linestyle="-", label="Population Vector")
+                    axes[0].plot(bin_times, bins, linestyle="--", linewidth=2, label="Fitted C(t)")
+                    axes[0].set_title("Hybrid Substep Population Fit")
+                    axes[0].set_xlabel("Time")
+                    axes[0].set_ylabel("Population")
+                    axes[0].set_yscale("log")
+                    axes[0].legend()
+                    axes[0].grid(True)
+                    # --- Hybrid flux solutions heatmap ---
+                    im_flux = axes[1].imshow(hybrid_solutions, aspect="auto", origin="lower", norm=LogNorm(),cmap="viridis")
+                    axes[1].set_title("Hybrid Flux Solutions")
+                    axes[1].set_xlabel("Cell Index")
+                    axes[1].set_ylabel("Substep")
+                    fig.colorbar(im_flux, ax=axes[1], shrink=0.8)
+
+                    # --- Initial Flux ---
+                    axes[2].plot(cell_idx, ics_copy[0], "-b")
+                    axes[2].set_title("Initial Flux")
+                    axes[2].set_xlabel("Cell Index")
+                    axes[2].set_ylabel("Flux")
+                    axes[2].grid(True)
+
+                    # --- Initial Current ---
+                    axes[3].plot(cell_idx[1:], ics_copy[1], "-r")
+                    axes[3].set_title("Initial Current")
+                    axes[3].set_xlabel("Cell Index")
+                    axes[3].set_ylabel("Current")
+                    axes[3].grid(True)
+
+                    # --- Initial Closure ---
+                    axes[4].plot(cell_idx, closure, "-g")
+                    axes[4].set_title("Initial Closure")
+                    axes[4].set_xlabel("Cell Index")
+                    axes[4].set_ylabel("Closure")
+                    axes[4].grid(True)
+     
+                    # --- Hybrid flux solutions heatmap ---
+                    im_flux = axes[5].imshow(np.array(qs), aspect="auto", origin="lower", cmap="viridis")
+                    axes[5].set_title("source")
+                    axes[5].set_xlabel("Cell Index")
+                    axes[5].set_ylabel("Substep")
+                    fig.colorbar(im_flux, ax=axes[5], shrink=0.8)
+                    # --- Hybrid flux solutions heatmap ---
+                    im_flux = axes[6].imshow(np.array(sig_fs), aspect="auto", origin="lower", cmap="viridis")
+                    axes[6].set_title("sigfs")
+                    axes[6].set_xlabel("Cell Index")
+                    axes[6].set_ylabel("Substep")
+                    fig.colorbar(im_flux, ax=axes[6], shrink=0.8)
+
+                    plt.tight_layout()
+                    plt.show()
             # Check and accordingly promote future particles to censused particle
+            
             if kernel.get_bank_size(mcdc["bank_future"]) > 0:
                 kernel.check_future_bank(mcdc)
             if (
@@ -119,15 +300,17 @@ def loop_fixed_source(data_arr, mcdc_arr):
             # Loop over source particles
             seed_source = kernel.split_seed(seed_census, SEED_SPLIT_SOURCE)
             loop_source(seed_source, data, mcdc)
-
+            
             # Score census tallies 
+            '''
             for b_idx in range(kernel.get_bank_size(mcdc["bank_census"])):
                 # Get particle from active bank
                 P_rec = mcdc["bank_census"]["particles"][b_idx]
                 P_arr = [P_rec]
                 for tally in mcdc["census_tallies"]:
                     kernel.score_census_tally(P_arr,tally,data,mcdc)
-            kernel.tally_accumulate(data,mcdc)
+                kernel.tally_accumulate(data,mcdc)
+            '''
             # Loop over source precursors
             if kernel.get_bank_size(mcdc["bank_precursor"]) > 0:
                 seed_source_precursor = kernel.split_seed(
@@ -136,6 +319,14 @@ def loop_fixed_source(data_arr, mcdc_arr):
                 loop_source_precursor(seed_source_precursor, data, mcdc)
 
             # Manage particle banks: population control and work rebalance
+
+
+            file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"
+            bank_size = kernel.get_bank_size(mcdc["bank_census"])
+            n_particle = mcdc["setting"]["N_particle"]
+            pop_factor = bank_size/n_particle
+            print("census population:",bank_size)
+            kernel.save_weight_window_data('population',kernel.get_bank_size(mcdc["bank_census"]),file=file)
             seed_bank = kernel.split_seed(seed_census, SEED_SPLIT_BANK)
             kernel.manage_particle_banks(seed_bank, mcdc)
 
@@ -144,6 +335,10 @@ def loop_fixed_source(data_arr, mcdc_arr):
                 if mcdc["mpi_master"]:
                     kernel.census_based_tally_output(data, mcdc)
                 # TODO: UQ tally
+            census_time = time.time() - census_start_time
+
+            file = str(mcdc["technique"]["ww"]["auto"])+"_ww_data.h5"
+            kernel.save_weight_window_data("census_time",census_time,file = file)
 
         # Multi-batch closeout
         if mcdc["setting"]["N_batch"] > 1:
@@ -228,7 +423,7 @@ def generate_source_particle(work_start, idx_work, seed, prog):
     # =====================================================================
     # Get a source particle and put into active bank
     # =====================================================================
-
+    
     P_arr = adapt.local_array(1, type_.particle_record)
     P = P_arr[0]
 
@@ -236,6 +431,7 @@ def generate_source_particle(work_start, idx_work, seed, prog):
     if kernel.get_bank_size(mcdc["bank_source"]) == 0:
         # Sample source
         kernel.source_particle(P_arr, seed_work, mcdc)
+        vall = 1
 
     # Get from source bank
     else:
@@ -245,7 +441,7 @@ def generate_source_particle(work_start, idx_work, seed, prog):
     # Skip if beyond time boundary
     if P["t"] > mcdc["setting"]["time_boundary"]:
         return
-
+    
     # If domain is decomposed, check if particle is in the domain
     if mcdc["technique"]["domain_decomposition"]:
         if not kernel.particle_in_domain(P_arr, mcdc):
@@ -275,13 +471,15 @@ def generate_source_particle(work_start, idx_work, seed, prog):
     # Put into the right bank
     if not hit_census:
         adapt.add_active(P_arr, prog)
+
     elif not hit_next_census:
         # Particle will participate after the current census
         adapt.add_census(P_arr, prog)
+    
     else:
         # Particle will participate in the future
         adapt.add_future(P_arr, prog)
-
+    
     """
         if mcdc["technique"]["domain_decomposition"]:
             if mcdc["technique"]["dd_work_ratio"][mcdc["dd_idx"]] > 0:
@@ -411,6 +609,7 @@ def source_dd_resolution(data, prog):
 
 @njit
 def loop_source(seed, data, mcdc):
+    idx_census = mcdc["idx_census"]
     # Progress bar indicator
     N_prog = 0
 
@@ -422,9 +621,26 @@ def loop_source(seed, data, mcdc):
     work_size = mcdc["mpi_work_size"]
     work_end = work_start + work_size
 
+    # Computing updates to weight windows
+    if (mcdc["technique"]["weight_window"] and idx_census < mcdc["setting"]["N_census"] - 1):
+        fracs = mcdc["technique"]["ww"]["update_fractions"][mcdc["technique"]["ww"]["update_fractions"]!=0]
+        if len(fracs[fracs>1])>0:
+            raise Exception("Error: update fractions must be less than 1")
+        fracs = mcdc["technique"]["ww"]["update_fractions"][mcdc["technique"]["ww"]["update_fractions"]!=0]
+        
+        updates = fracs*work_size
+        for i in range(len(updates)):
+            updates[i] = int(updates[i])
+    else:
+        updates = []
+    u = 0
     for idx_work in range(work_size):
-        generate_source_particle(work_start, idx_work, seed, mcdc)
 
+        if idx_work in updates and mcdc["technique"]["ww"]["auto"] == WW_HYBRID:
+            u += 1
+            kernel.update_weight_windows(data, mcdc,work_idx = idx_work,u = u)
+
+        generate_source_particle(work_start, idx_work, seed, mcdc)
         # Run the source particle and its secondaries
         exhaust_active_bank(data, mcdc)
 
@@ -579,7 +795,6 @@ def step_particle(P_arr, data, prog):
         # Generate IC?
         if mcdc["technique"]["IC_generator"] and mcdc["cycle_active"]:
             kernel.bank_IC(P_arr, prog)
-
         # Branchless collision?
         if mcdc["technique"]["branchless_collision"]:
             kernel.branchless_collision(P_arr, prog)
@@ -611,6 +826,9 @@ def step_particle(P_arr, data, prog):
 
     # Census time crossing
     if P["event"] & EVENT_TIME_CENSUS:
+        for tally in mcdc["census_tallies"]:
+            kernel.score_census_tally(P_arr,tally,data,mcdc)
+            #kernel.tally_accumulate(data,mcdc)
         adapt.add_census(P_arr, prog)
         P["alive"] = False
 
@@ -627,7 +845,6 @@ def step_particle(P_arr, data, prog):
         # check if weight has fallen below threshold
         if abs(P["w"]) <= mcdc["technique"]["wr_threshold"]:
             kernel.weight_roulette(P_arr, mcdc)
-
 
 # =============================================================================
 # Precursor source loop

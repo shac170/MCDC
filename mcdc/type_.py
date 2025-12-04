@@ -772,7 +772,6 @@ def make_type_census_tally(input_deck):
         Nmax_azi = max(Nmax_azi, len(card.azi))
         Nmax_g = max(Nmax_g, len(card.g))
         Nmax_score = max(Nmax_score, len(card.scores))
-
     # reduce tally sizes for subdomains
     if input_deck.technique["domain_decomposition"]:
         Nmax_x, Nmax_y, Nmax_z = dd_meshtally(input_deck)
@@ -818,7 +817,6 @@ def make_type_census_tally(input_deck):
 
     # Make tally structure
     census_tally = into_dtype(struct)
-
 
 def make_type_mesh_tally(input_deck):
     global mesh_tally
@@ -1100,8 +1098,8 @@ def make_type_cs_tally(input_deck):
                 N_cs_centers,
             ),
         ),
-        ("cs_S", float64, (N_cs_centers, (Nmax_x - 1) * (Nmax_y - 1))),
-        ("cs_reconstruction", float64, ((Nmax_y - 1), (Nmax_x - 1))),
+        ("cs_S", float64, (N_cs_centers, (Nmax_x - 1) * (Nmax_t - 1))),
+        ("cs_reconstruction", float64, ((Nmax_t - 1), (Nmax_x - 1))),
         ("x", float64, (Nmax_x,)),
         ("y", float64, (Nmax_y,)),
         ("z", float64, (Nmax_z,)),
@@ -1244,6 +1242,13 @@ def make_type_technique(input_deck):
     # =========================================================================
 
     struct += [("pct", int64), ("pc_factor", float64)]
+    struct += [
+        ("continuous_pc_degree", int64),                # polynomial degree /exp degree/unfitted len
+        ("continuous_pc_bins", float64, (1000,)),            # 1D array of coefficients
+        ("continuous_pc_subtimes", float64, (1000,)),            # 1D array of coefficients
+        ("continuous_pc_type", int64),                  # toggle for polynomial/exp/unfitted
+        ("continuous_pc_substeps", int64)
+    ]
 
     # =========================================================================
     # domain decomp
@@ -1283,7 +1288,8 @@ def make_type_technique(input_deck):
     ww_list += [("mesh", mesh)]
     ww_list += [("auto", int64)]
     ww_list += [("width", float64)]
-    ww_list += [("epsilon", float64, (9,))]
+    ww_list += [("epsilon", float64, (10,))]
+    ww_list += [("update_fractions", float64, (100,))]
     ww_list += [("center", float64, (Nt, Nx, Ny, Nz))]
     ww_list += [("save", bool_)]
     ww_list += [("tally_idx", int64)]
@@ -1647,6 +1653,8 @@ def make_type_global(input_deck):
     N_universe = len(input_deck.universes)
     N_lattice = len(input_deck.lattices)
     N_mesh_tally = len(input_deck.mesh_tallies)
+    N_edge_tally = len(input_deck.edge_tallies)
+    N_census_tally = len(input_deck.census_tallies)
     N_surface_tally = len(input_deck.surface_tallies)
     N_cell_tally = len(input_deck.cell_tallies)
     N_cs_tally = len(input_deck.cs_tallies)
@@ -1727,8 +1735,8 @@ def make_type_global(input_deck):
             ("lattices", lattice, (N_lattice,)),
             ("sources", source, (N_source,)),
             ("mesh_tallies", mesh_tally, (N_mesh_tally,)),
-            ("census_tallies", mesh_tally, (N_mesh_tally,)),
-            ("edge_tallies", mesh_tally, (N_mesh_tally,)),
+            ("census_tallies", census_tally, (N_census_tally,)),
+            ("edge_tallies", edge_tally, (N_edge_tally,)),
             ("surface_tallies", surface_tally, (N_surface_tally,)),
             ("cell_tallies", cell_tally, (N_cell_tally,)),
             ("cs_tallies", cs_tally, (N_cs_tally,)),

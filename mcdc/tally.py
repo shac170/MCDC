@@ -236,8 +236,8 @@ def census_tally(
                 "f3"
             ],
         )
-        card.scores.append(score_checked)
 
+        card.scores.append(score_checked)
     # Add to deck
     global_.input_deck.census_tallies.append(card)
 
