@@ -36,6 +36,9 @@ from mcdc.constant import (
     SCORE_ENERGY_DEPOSITION,
     SCORE_CURRENT_IN,
     SCORE_CURRENT_OUT,
+    SCORE_SECOND_MOMENT_X,
+    SCORE_SECOND_MOMENT_Y,
+    SCORE_SECOND_MOMENT_Z,
     SUPPORTED_SCORES,
     SUPPORTED_SCORES_SURFACE_CROSSING,
     SUPPORTED_SCORES_TRACKLENGTH,
@@ -304,6 +307,12 @@ class Tally(MCDCPolymorphic):
                 self.scores.append(SCORE_CURRENT_OUT)
             elif score == "energy_deposition":
                 self.scores.append(SCORE_ENERGY_DEPOSITION)
+            elif score == "second_moment_x":
+                self.scores.append(SCORE_SECOND_MOMENT_X)
+            elif score == "second_moment_y":
+                self.scores.append(SCORE_SECOND_MOMENT_Y)
+            elif score == "second_moment_z":
+                self.scores.append(SCORE_SECOND_MOMENT_Z)
             else:
                 print_error(f"Unknown tally score: {score}")
 
@@ -473,6 +482,12 @@ def decode_score_type(type_, lower_case=False):
         return "Current out" if not lower_case else "current-out"
     elif type_ == SCORE_ENERGY_DEPOSITION:
         return "Energy deposition" if not lower_case else "energy_deposition"
+    elif type_ == SCORE_SECOND_MOMENT_X:
+        return "Second moment x" if not lower_case else "second-moment-x"
+    elif type_ == SCORE_SECOND_MOMENT_Y:
+        return "Second moment y" if not lower_case else "second-moment-y"
+    elif type_ == SCORE_SECOND_MOMENT_Z:
+        return "Second moment y" if not lower_case else "second-moment-z"
     else:
         print_error(f"Unknown tally score code: {type_}")
         return "Unknown score"

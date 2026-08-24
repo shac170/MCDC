@@ -177,6 +177,9 @@ SCORE_DENSITY = 1
 SCORE_COLLISION = 2
 SCORE_CAPTURE = 3
 SCORE_FISSION = 4
+SCORE_SECOND_MOMENT_X = 5
+SCORE_SECOND_MOMENT_Y = 6
+SCORE_SECOND_MOMENT_Z = 7
 
 # Surface-crossing scores
 SCORE_CURRENT_NET = 100
@@ -188,7 +191,16 @@ SCORE_ENERGY_DEPOSITION = 200
 
 # Supported scores by estimator type
 SUPPORTED_SCORES_SURFACE_CROSSING = {"current-net", "current-in", "current-out"}
-SUPPORTED_SCORES_TRACKLENGTH = {"flux", "density", "collision", "capture", "fission"}
+SUPPORTED_SCORES_TRACKLENGTH = {
+    "flux",
+    "density",
+    "collision",
+    "capture",
+    "fission",
+    "second_moment_x",
+    "second_moment_y",
+    "second_moment_z",
+}
 SUPPORTED_SCORES_COLLISION = {"energy_deposition"}
 SUPPORTED_SCORES = (
     SUPPORTED_SCORES_SURFACE_CROSSING

@@ -27,6 +27,9 @@ from mcdc.constant import (
     SCORE_CURRENT_IN,
     SCORE_CURRENT_OUT,
     SCORE_ENERGY_DEPOSITION,
+    SCORE_SECOND_MOMENT_X,
+    SCORE_SECOND_MOMENT_Y,
+    SCORE_SECOND_MOMENT_Z,
 )
 from mcdc.transport.geometry.interface import check_cell
 from mcdc.transport.geometry.surface import get_normal_component
@@ -398,6 +401,12 @@ def tracklength(particle_container, distance, tally, simulation, data):
                 score = flux * physics.macro_xs(
                     NEUTRON_REACTION_FISSION, particle_container, simulation, data
                 )
+            elif score_type == SCORE_SECOND_MOMENT_X:
+                score = flux * ux * ux
+            elif score_type == SCORE_SECOND_MOMENT_Y:
+                score = flux * uy * uy
+            elif score_type == SCORE_SECOND_MOMENT_Z:
+                score = flux * uz * uz
             util.atomic_add(data, idx_base + i_score, score)
 
         # Accumulate distance swept
