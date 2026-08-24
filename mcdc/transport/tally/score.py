@@ -27,18 +27,21 @@ from mcdc.constant import (
     SCORE_CURRENT_IN,
     SCORE_CURRENT_OUT,
     SCORE_ENERGY_DEPOSITION,
+    SCORE_SECOND_MOMENT_X,
+    SCORE_SECOND_MOMENT_Y,
+    SCORE_SECOND_MOMENT_Z,
 )
 from mcdc.transport.geometry.interface import check_cell
 from mcdc.transport.geometry.surface import get_normal_component
 from mcdc.transport.tally.filter import get_filter_indices
 
 # ======================================================================================
-# Surface-crossing
+# Surface crossing tally
 # ======================================================================================
 
 
 @njit
-def surface_crossing(
+def surface_crossing_tally(
     particle_container,
     surface,
     tally,
@@ -46,11 +49,13 @@ def surface_crossing(
     data,
 ):
     particle = particle_container[0]
-    sub_ID = tally["sub_ID"]
-    surface_crossing_tally = simulation["surface_crossing_tallies"][sub_ID]
+    tally_base = simulation["tallies"][tally["parent_ID"]]
 
     # Get filter indices
-    i_mu, i_azi, i_energy, i_time = get_filter_indices(particle_container, tally, data)
+    MG_mode = simulation["settings"]["neutron_multigroup_mode"]
+    i_mu, i_azi, i_energy, i_time = get_filter_indices(
+        particle_container, tally_base, data, MG_mode
+    )
 
     # No score if outside non-changing phase-space bins
     if i_mu == -1 or i_azi == -1 or i_energy == -1 or i_time == -1:
@@ -58,11 +63,11 @@ def surface_crossing(
 
     # Tally index
     idx_base = (
-        tally["bin_offset"]
-        + i_mu * tally["stride_mu"]
-        + i_azi * tally["stride_azi"]
-        + i_energy * tally["stride_energy"]
-        + i_time * tally["stride_time"]
+        tally_base["bin_offset"]
+        + i_mu * tally_base["stride_mu"]
+        + i_azi * tally_base["stride_azi"]
+        + i_energy * tally_base["stride_energy"]
+        + i_time * tally_base["stride_time"]
     )
 
     # Flux
@@ -71,9 +76,9 @@ def surface_crossing(
     flux = particle["w"] / abs(mu)
 
     # Non-cell-filtered score
-    if not surface_crossing_tally["cell_filtered"]:
-        for i_score in range(tally["scores_length"]):
-            score_type = mcdc_get.tally.scores(i_score, tally, data)
+    if not tally["cell_filtered"]:
+        for i_score in range(tally_base["scores_length"]):
+            score_type = mcdc_get.tally.scores(i_score, tally_base, data)
 
             score = 0.0
             if score_type == SCORE_CURRENT_NET:
@@ -90,14 +95,14 @@ def surface_crossing(
 
     # Cell-filtered score
     previous_cell_ID = particle["cell_ID"]
-    filter_cell_ID = surface_crossing_tally["cell_filter_ID"]
+    filter_cell_ID = tally["cell_filter_ID"]
     filter_cell = simulation["cells"][filter_cell_ID]
     was_in_filter_cell = previous_cell_ID == filter_cell_ID
     now_in_filter_cell = check_cell(particle_container, filter_cell, simulation, data)
     entered_filter_cell = not was_in_filter_cell and now_in_filter_cell
     exited_filter_cell = was_in_filter_cell and not now_in_filter_cell
-    for i_score in range(tally["scores_length"]):
-        score_type = mcdc_get.tally.scores(i_score, tally, data)
+    for i_score in range(tally_base["scores_length"]):
+        score_type = mcdc_get.tally.scores(i_score, tally_base, data)
 
         score = 0.0
         if score_type == SCORE_CURRENT_NET:
@@ -116,19 +121,23 @@ def surface_crossing(
 
 
 # ======================================================================================
-# Collision
+# Collision tally
 # ======================================================================================
 
 
 @njit
-def collision(particle_container, collision_data_container, tally, simulation, data):
+def collision_tally(
+    particle_container, collision_data_container, tally, simulation, data
+):
     particle = particle_container[0]
     collision_data = collision_data_container[0]
-    sub_ID = tally["sub_ID"]
-    collision_tally = simulation["collision_tallies"][sub_ID]
+    tally_base = simulation["tallies"][tally["parent_ID"]]
 
     # Get filter indices
-    i_mu, i_azi, i_energy, i_time = get_filter_indices(particle_container, tally, data)
+    MG_mode = simulation["settings"]["neutron_multigroup_mode"]
+    i_mu, i_azi, i_energy, i_time = get_filter_indices(
+        particle_container, tally_base, data, MG_mode
+    )
 
     # No score if outside non-changing phase-space bins
     if i_mu == -1 or i_azi == -1 or i_energy == -1 or i_time == -1:
@@ -136,8 +145,8 @@ def collision(particle_container, collision_data_container, tally, simulation, d
 
     # Mesh tally indices if needed
     i_x, i_y, i_z = 0, 0, 0
-    if collision_tally["mesh_filtered"]:
-        mesh = simulation["meshes"][collision_tally["mesh_filter_ID"]]
+    if tally["mesh_filtered"]:
+        mesh = simulation["meshes"][tally["mesh_filter_ID"]]
         i_x, i_y, i_z = mesh_module.get_indices(
             particle_container, mesh, simulation, data
         )
@@ -148,22 +157,22 @@ def collision(particle_container, collision_data_container, tally, simulation, d
 
     # Tally index
     idx_base = (
-        tally["bin_offset"]
-        + i_mu * tally["stride_mu"]
-        + i_azi * tally["stride_azi"]
-        + i_energy * tally["stride_energy"]
-        + i_time * tally["stride_time"]
+        tally_base["bin_offset"]
+        + i_mu * tally_base["stride_mu"]
+        + i_azi * tally_base["stride_azi"]
+        + i_energy * tally_base["stride_energy"]
+        + i_time * tally_base["stride_time"]
     )
-    if collision_tally["mesh_filtered"]:
+    if tally["mesh_filtered"]:
         idx_base += (
-            +i_x * collision_tally["mesh_stride_x"]
-            + i_y * collision_tally["mesh_stride_y"]
-            + i_z * collision_tally["mesh_stride_z"]
+            +i_x * tally["mesh_stride_x"]
+            + i_y * tally["mesh_stride_y"]
+            + i_z * tally["mesh_stride_z"]
         )
 
     # Score
-    for i_score in range(tally["scores_length"]):
-        score_type = mcdc_get.tally.scores(i_score, tally, data)
+    for i_score in range(tally_base["scores_length"]):
+        score_type = mcdc_get.tally.scores(i_score, tally_base, data)
         score = 0.0
         if score_type == SCORE_ENERGY_DEPOSITION:
             score = collision_data["energy_deposition"]
@@ -176,13 +185,15 @@ def collision(particle_container, collision_data_container, tally, simulation, d
 
 
 @njit
-def tracklength(particle_container, distance, tally, simulation, data):
+def tracklength_tally(particle_container, distance, tally, simulation, data):
     particle = particle_container[0]
-    sub_ID = tally["sub_ID"]
-    tracklength_tally = simulation["tracklength_tallies"][sub_ID]
+    tally_base = simulation["tallies"][tally["parent_ID"]]
 
     # Get filter indices
-    i_mu, i_azi, i_energy, i_time = get_filter_indices(particle_container, tally, data)
+    MG_mode = simulation["settings"]["neutron_multigroup_mode"]
+    i_mu, i_azi, i_energy, i_time = get_filter_indices(
+        particle_container, tally_base, data, MG_mode
+    )
 
     # No score if outside non-changing phase-space bins
     if i_mu == -1 or i_azi == -1 or i_energy == -1:
@@ -203,8 +214,8 @@ def tracklength(particle_container, distance, tally, simulation, data):
     t_final = t + ut * distance
 
     # No score if particle does not cross the time bins
-    t_min = mcdc_get.tally.time(0, tally, data)
-    t_max = mcdc_get.tally.time_last(tally, data)
+    t_min = mcdc_get.tally.time(0, tally_base, data)
+    t_max = mcdc_get.tally.time_last(tally_base, data)
     if (
         t_final < t_min + COINCIDENCE_TOLERANCE_TIME
         or t > t_max - COINCIDENCE_TOLERANCE_TIME
@@ -222,8 +233,8 @@ def tracklength(particle_container, distance, tally, simulation, data):
 
     # Mesh axis indices
     i_x, i_y, i_z = 0, 0, 0
-    if tracklength_tally["mesh_filtered"]:
-        mesh = simulation["meshes"][tracklength_tally["mesh_filter_ID"]]
+    if tally["mesh_filtered"]:
+        mesh = simulation["meshes"][tally["mesh_filter_ID"]]
 
         # Mesh axis indices
         i_x, i_y, i_z = mesh_module.get_indices(
@@ -294,24 +305,24 @@ def tracklength(particle_container, distance, tally, simulation, data):
 
     # Tally base index
     idx_base = (
-        tally["bin_offset"]
-        + i_mu * tally["stride_mu"]
-        + i_azi * tally["stride_azi"]
-        + i_energy * tally["stride_energy"]
-        + i_time * tally["stride_time"]
+        tally_base["bin_offset"]
+        + i_mu * tally_base["stride_mu"]
+        + i_azi * tally_base["stride_azi"]
+        + i_energy * tally_base["stride_energy"]
+        + i_time * tally_base["stride_time"]
     )
-    if tracklength_tally["mesh_filtered"]:
+    if tally["mesh_filtered"]:
         idx_base += (
-            i_x * tracklength_tally["mesh_stride_x"]
-            + i_y * tracklength_tally["mesh_stride_y"]
-            + i_z * tracklength_tally["mesh_stride_z"]
+            i_x * tally["mesh_stride_x"]
+            + i_y * tally["mesh_stride_y"]
+            + i_z * tally["mesh_stride_z"]
         )
 
     # Sweep through the distance
     distance_swept = 0.0
     while distance_swept < distance - COINCIDENCE_TOLERANCE:
         # The next time grid
-        t_next = mcdc_get.tally.time(i_time + 1, tally, data)
+        t_next = mcdc_get.tally.time(i_time + 1, tally_base, data)
 
         # Get the distance to score in this segment
         if t_final < t_next - COINCIDENCE_TOLERANCE_TIME:
@@ -325,8 +336,8 @@ def tracklength(particle_container, distance, tally, simulation, data):
         #     axis is crossed
 
         axis_crossed = AXIS_T
-        if tracklength_tally["mesh_filtered"]:
-            mesh = simulation["meshes"][tracklength_tally["mesh_filter_ID"]]
+        if tally["mesh_filtered"]:
+            mesh = simulation["meshes"][tally["mesh_filter_ID"]]
 
             # x-direction
             if ux == 0.0:
@@ -378,8 +389,8 @@ def tracklength(particle_container, distance, tally, simulation, data):
 
         # Score
         flux = distance_scored * particle["w"]
-        for i_score in range(tally["scores_length"]):
-            score_type = mcdc_get.tally.scores(i_score, tally, data)
+        for i_score in range(tally_base["scores_length"]):
+            score_type = mcdc_get.tally.scores(i_score, tally_base, data)
             score = 0.0
             if score_type == SCORE_FLUX:
                 score = flux
@@ -398,13 +409,19 @@ def tracklength(particle_container, distance, tally, simulation, data):
                 score = flux * physics.macro_xs(
                     NEUTRON_REACTION_FISSION, particle_container, simulation, data
                 )
+            elif score_type == SCORE_SECOND_MOMENT_X:
+                score = flux * ux * ux
+            elif score_type == SCORE_SECOND_MOMENT_Y:
+                score = flux * uy * uy
+            elif score_type == SCORE_SECOND_MOMENT_Z:
+                score = flux * uz * uz
             util.atomic_add(data, idx_base + i_score, score)
 
         # Accumulate distance swept
         distance_swept += distance_scored
 
         # Move the 4D position
-        if tracklength_tally["mesh_filtered"]:
+        if tally["mesh_filtered"]:
             x += distance_scored * ux
             y += distance_scored * uy
             z += distance_scored * uz
@@ -413,44 +430,44 @@ def tracklength(particle_container, distance, tally, simulation, data):
         # Increment index and heck if out of bounds
         if axis_crossed == AXIS_T:
             i_time += 1
-            idx_base += tally["stride_time"]
-            if i_time == tally["time_length"] - 1:
+            idx_base += tally_base["stride_time"]
+            if i_time == tally_base["time_length"] - 1:
                 return
-        elif tracklength_tally["mesh_filtered"]:
-            mesh = simulation["meshes"][tracklength_tally["mesh_filter_ID"]]
+        elif tally["mesh_filtered"]:
+            mesh = simulation["meshes"][tally["mesh_filter_ID"]]
             if axis_crossed == AXIS_X:
                 if ux > 0.0:
                     i_x += 1
                     if i_x == mesh["Nx"]:
                         return
-                    idx_base += tracklength_tally["mesh_stride_x"]
+                    idx_base += tally["mesh_stride_x"]
                 else:
                     i_x -= 1
                     if i_x == -1:
                         return
-                    idx_base -= tracklength_tally["mesh_stride_x"]
+                    idx_base -= tally["mesh_stride_x"]
             elif axis_crossed == AXIS_Y:
                 if uy > 0.0:
                     i_y += 1
                     if i_y == mesh["Ny"]:
                         return
-                    idx_base += tracklength_tally["mesh_stride_y"]
+                    idx_base += tally["mesh_stride_y"]
                 else:
                     i_y -= 1
                     if i_y == -1:
                         return
-                    idx_base -= tracklength_tally["mesh_stride_y"]
+                    idx_base -= tally["mesh_stride_y"]
             elif axis_crossed == AXIS_Z:
                 if uz > 0.0:
                     i_z += 1
                     if i_z == mesh["Nz"]:
                         return
-                    idx_base += tracklength_tally["mesh_stride_z"]
+                    idx_base += tally["mesh_stride_z"]
                 else:
                     i_z -= 1
                     if i_z == -1:
                         return
-                    idx_base -= tracklength_tally["mesh_stride_z"]
+                    idx_base -= tally["mesh_stride_z"]
 
 
 # =============================================================================
